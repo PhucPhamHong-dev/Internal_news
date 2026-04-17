@@ -1,0 +1,47 @@
+﻿@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Manrope", sans-serif;
+  color: #111827;
+  background:
+    radial-gradient(circle at top left, rgba(191, 219, 254, 0.55), transparent 28%),
+    radial-gradient(circle at top right, rgba(219, 234, 254, 0.7), transparent 26%),
+    linear-gradient(180deg, #f8fafc 0%, #eef6ff 48%, #ffffff 100%);
+}
+
+@layer components {
+  .card {
+    @apply rounded-[28px] border border-[#E5E7EB] bg-white shadow-[0_18px_45px_-28px_rgba(37,99,235,0.28)];
+  }
+
+  .soft-panel {
+    @apply rounded-[24px] border border-white/70 bg-white/80 backdrop-blur-xl shadow-[0_18px_45px_-30px_rgba(15,23,42,0.2)];
+  }
+
+  .icon-btn {
+    @apply inline-flex items-center justify-center rounded-2xl border border-transparent text-slate-500 transition hover:bg-slate-100 hover:text-slate-700;
+  }
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
