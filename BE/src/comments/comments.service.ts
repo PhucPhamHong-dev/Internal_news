@@ -190,6 +190,14 @@ export class CommentsService {
   }
 
   async likeComment(commentId: string, userId: string) {
+    const comment = await this.prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true }
+    });
+    if (!comment) {
+      throw new NotFoundException("Comment not found");
+    }
+
     await this.prisma.commentLike.upsert({
       where: { commentId_userId: { commentId, userId } },
       update: {},
@@ -201,6 +209,14 @@ export class CommentsService {
   }
 
   async unlikeComment(commentId: string, userId: string) {
+    const comment = await this.prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { id: true }
+    });
+    if (!comment) {
+      throw new NotFoundException("Comment not found");
+    }
+
     await this.prisma.commentLike.deleteMany({ where: { commentId, userId } });
     const likeCount = await this.prisma.commentLike.count({ where: { commentId } });
     return { likedByMe: false, likeCount };

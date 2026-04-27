@@ -7,6 +7,7 @@ import { NotificationsGateway } from "../notifications/notifications.gateway";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreatePostDto } from "../posts/dto/create-post.dto";
 import { PostsService } from "../posts/posts.service";
+import { generateTemporaryPassword, hashPassword } from "../auth/password.util";
 
 type UserFilter = "ALL" | "PENDING" | "LINKED" | "ACTIVE" | "DISABLED";
 
@@ -122,17 +123,27 @@ export class AdminService {
     };
   }
 
-  async createUser(msnv: string, fullName: string) {
+  async createUser(msnv: string, fullName: string, initialPassword?: string) {
     const existing = await this.prisma.employeeMaster.findUnique({ where: { msnv } });
     if (existing) {
       throw new BadRequestException("MSNV da ton tai");
     }
 
+    const temporaryPassword = initialPassword || generateTemporaryPassword();
     const created = await this.prisma.employeeMaster.create({
-      data: { msnv, fullName, preferredRole: RoleEnum.VIEWER, isActive: true }
+      data: {
+        msnv,
+        fullName,
+        preferredRole: RoleEnum.VIEWER,
+        isActive: true,
+        passwordHash: hashPassword(temporaryPassword),
+        temporaryPasswordPreview: temporaryPassword,
+        mustChangePassword: true
+      },
+      include: { linkedUser: true }
     });
     await this.redis.del(CacheKeys.adminUserStats());
-    return created;
+    return this.serializeEmployee(created);
   }
 
   async updateUser(
@@ -200,6 +211,29 @@ export class AdminService {
 
     await this.redis.del(CacheKeys.adminUserStats());
     return { ok: true };
+  }
+
+  async resetPassword(employeeId: string, nextPassword?: string) {
+    const employee = await this.prisma.employeeMaster.findUnique({
+      where: { id: employeeId }
+    });
+    if (!employee) {
+      throw new NotFoundException("Employee not found");
+    }
+
+    const temporaryPassword = nextPassword || generateTemporaryPassword();
+    const updated = await this.prisma.employeeMaster.update({
+      where: { id: employeeId },
+      data: {
+        passwordHash: hashPassword(temporaryPassword),
+        temporaryPasswordPreview: temporaryPassword,
+        mustChangePassword: true,
+        passwordChangedAt: null
+      },
+      include: { linkedUser: true }
+    });
+
+    return this.serializeEmployee(updated);
   }
 
   async composeAsUser(employeeId: string, dto: CreatePostDto) {
@@ -273,6 +307,9 @@ export class AdminService {
       avatarUrl: string | null;
       role: Role;
     } | null;
+    temporaryPasswordPreview?: string | null;
+    mustChangePassword?: boolean;
+    passwordChangedAt?: Date | null;
   }) {
     return {
       id: employee.id,
@@ -281,6 +318,9 @@ export class AdminService {
       isActive: employee.isActive,
       preferredRole: employee.preferredRole,
       status: !employee.isActive ? "DISABLED" : employee.linkedUser?.email ? "LINKED" : "PENDING",
+      temporaryPassword: employee.temporaryPasswordPreview ?? null,
+      mustChangePassword: employee.mustChangePassword ?? false,
+      passwordChangedAt: employee.passwordChangedAt?.toISOString() ?? null,
       linkedUser: employee.linkedUser
         ? {
             id: employee.linkedUser.id,

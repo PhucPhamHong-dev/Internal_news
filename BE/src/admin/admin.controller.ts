@@ -7,6 +7,7 @@ import { CreatePostDto } from "../posts/dto/create-post.dto";
 import { AdminService } from "./admin.service";
 import { BroadcastDto } from "./dto/broadcast.dto";
 import { CreateManagedUserDto } from "./dto/create-managed-user.dto";
+import { ResetManagedPasswordDto } from "./dto/reset-managed-password.dto";
 import { UpdateManagedUserDto } from "./dto/update-managed-user.dto";
 
 @Controller("admin")
@@ -42,7 +43,7 @@ export class AdminController {
 
   @Post("users")
   createUser(@Body() body: CreateManagedUserDto) {
-    return this.adminService.createUser(body.msnv.trim().toUpperCase(), body.fullName.trim());
+    return this.adminService.createUser(body.msnv.trim().toUpperCase(), body.fullName.trim(), body.initialPassword?.trim());
   }
 
   @Patch("users/:employeeId")
@@ -57,6 +58,11 @@ export class AdminController {
   @Post("users/:employeeId/unlink-gmail")
   unlinkGmail(@Param("employeeId") employeeId: string) {
     return this.adminService.unlinkGmail(employeeId);
+  }
+
+  @Post("users/:employeeId/reset-password")
+  resetPassword(@Param("employeeId") employeeId: string, @Body() body: ResetManagedPasswordDto) {
+    return this.adminService.resetPassword(employeeId, body.newPassword?.trim());
   }
 
   @Post("posts/as-user/:employeeId")

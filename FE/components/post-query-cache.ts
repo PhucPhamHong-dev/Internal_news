@@ -92,10 +92,15 @@ export function updatePostInQueryCache(queryClient: QueryClient, postId: string,
   queryClient.setQueriesData({ queryKey: ["post-detail", postId] }, (current) => updatePostDetail(current as FeedPost | undefined, postId, updater));
 }
 
-export function updatePostCounters(queryClient: QueryClient, postId: string, delta: Partial<Pick<FeedPost, "likeCount" | "commentCount" | "viewCount" | "likedByMe">>) {
+export function updatePostCounters(
+  queryClient: QueryClient,
+  postId: string,
+  delta: Partial<Pick<FeedPost, "likeCount" | "commentCount" | "viewCount" | "likedByMe" | "myReaction">>
+) {
   updatePostInQueryCache(queryClient, postId, (post) => ({
     ...post,
     likedByMe: delta.likedByMe ?? post.likedByMe,
+    myReaction: delta.myReaction ?? post.myReaction,
     likeCount: Math.max(0, delta.likeCount ?? post.likeCount),
     commentCount: Math.max(0, delta.commentCount ?? post.commentCount),
     viewCount: Math.max(0, delta.viewCount ?? post.viewCount)

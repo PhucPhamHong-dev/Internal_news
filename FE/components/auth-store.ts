@@ -10,6 +10,8 @@ export type Profile = {
   role: "ADMIN" | "WRITER" | "VIEWER";
   linkedMsnv: string | null;
   linked: boolean;
+  mustChangePassword?: boolean;
+  themeKey?: string;
 };
 
 type AuthState = {
@@ -132,4 +134,3 @@ export function useAuthStore() {
     clearAuth
   };
 }
-

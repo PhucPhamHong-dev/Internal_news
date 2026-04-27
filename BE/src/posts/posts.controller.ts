@@ -7,6 +7,7 @@ import { RolesGuard } from "../common/roles.guard";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CreatePostDto } from "./dto/create-post.dto";
 import { UpdatePostDto } from "./dto/update-post.dto";
+import { SetReactionDto } from "./dto/set-reaction.dto";
 import { PostsService } from "./posts.service";
 
 @Controller()
@@ -26,13 +27,22 @@ export class PostsController {
     @CurrentUser() user: AuthUser,
     @Query("limit") limit?: string,
     @Query("cursor") cursor?: string,
-    @Query("excludeId") excludeId?: string
+    @Query("excludeId") excludeId?: string,
+    @Query("year") year?: string,
+    @Query("month") month?: string
   ) {
     return this.postsService.getFeed(user.sub, {
       limit: limit ? Number(limit) : undefined,
       cursor: cursor || undefined,
-      excludeId: excludeId || undefined
+      excludeId: excludeId || undefined,
+      year: year ? Number(year) : undefined,
+      month: month ? Number(month) : undefined
     });
+  }
+
+  @Get("posts/archive")
+  getArchive() {
+    return this.postsService.getArchive();
   }
 
   @Get("posts/:id")
@@ -81,6 +91,16 @@ export class PostsController {
 
   @Delete("posts/:id/like")
   unlikePost(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.postsService.unlikePost(user.sub, id);
+  }
+
+  @Post("posts/:id/reaction")
+  setReaction(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: SetReactionDto) {
+    return this.postsService.setReaction(user, id, body.type);
+  }
+
+  @Delete("posts/:id/reaction")
+  clearReaction(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.postsService.unlikePost(user.sub, id);
   }
 

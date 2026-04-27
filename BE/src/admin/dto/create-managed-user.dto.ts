@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, MaxLength } from "class-validator";
+import { IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 
 export class CreateManagedUserDto {
   @IsString()
@@ -10,4 +10,10 @@ export class CreateManagedUserDto {
   @IsNotEmpty()
   @MaxLength(150)
   fullName!: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(120)
+  initialPassword?: string;
 }

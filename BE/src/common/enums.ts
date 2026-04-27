@@ -16,4 +16,14 @@ export enum NotificationTypeEnum {
   COMMENT_REPLIED = "COMMENT_REPLIED"
 }
 
+export enum ReactionTypeEnum {
+  LIKE = "LIKE",
+  LOVE = "LOVE",
+  CARE = "CARE",
+  HAHA = "HAHA",
+  WOW = "WOW",
+  SAD = "SAD",
+  ANGRY = "ANGRY"
+}
+
 export type RoleValue = `${RoleEnum}`;

@@ -32,6 +32,9 @@ type ManagedUser = {
     avatarUrl: string | null;
     role: "ADMIN" | "WRITER" | "VIEWER";
   } | null;
+  temporaryPassword: string | null;
+  mustChangePassword: boolean;
+  passwordChangedAt: string | null;
 };
 
 type UserFilter = "ALL" | "PENDING" | "LINKED" | "ACTIVE" | "DISABLED";
@@ -67,10 +70,12 @@ type CreateUserModalProps = {
   open: boolean;
   name: string;
   msnv: string;
+  password: string;
   loading: boolean;
   error: string | null;
   onChangeName: (value: string) => void;
   onChangeMsnv: (value: string) => void;
+  onChangePassword: (value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
 };
@@ -84,6 +89,7 @@ type UserDetailModalProps = {
   onToggleActive: () => void;
   onToggleCanPostAsUser: () => void;
   onUnlinkGmail: () => void;
+  onResetPassword: () => void;
   onSave: () => void;
 };
 
@@ -208,7 +214,7 @@ function UserActionsDropdown({ user, open, onOpenChange, onView, onCompose, onUn
   );
 }
 
-function CreateUserModal({ open, name, msnv, loading, error, onChangeName, onChangeMsnv, onClose, onSubmit }: CreateUserModalProps) {
+function CreateUserModal({ open, name, msnv, password, loading, error, onChangeName, onChangeMsnv, onChangePassword, onClose, onSubmit }: CreateUserModalProps) {
   if (!open) return null;
 
   return (
@@ -245,8 +251,19 @@ function CreateUserModal({ open, name, msnv, loading, error, onChangeName, onCha
             />
           </div>
 
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-600">Mật khẩu cấp lần đầu (không bắt buộc)</label>
+            <input
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
+              type="text"
+              value={password}
+              onChange={(event) => onChangePassword(event.target.value)}
+              placeholder="Bỏ trống để hệ thống tự tạo"
+            />
+          </div>
+
           <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-700">
-            Gmail sẽ được liên kết khi nhân viên đăng nhập Google và nhập đúng mã số nhân viên.
+            Nhân viên có thể đăng nhập bằng MSNV và mật khẩu được cấp. Nếu bỏ trống, hệ thống sẽ random mật khẩu và hiển thị ở bảng cho đến khi nhân viên đổi mật khẩu.
           </div>
 
           {error && <div className="text-sm text-red-600">{error}</div>}
@@ -269,7 +286,7 @@ function CreateUserModal({ open, name, msnv, loading, error, onChangeName, onCha
   );
 }
 
-function UserDetailModal({ user, loading, error, onClose, onChangeName, onToggleActive, onToggleCanPostAsUser, onUnlinkGmail, onSave }: UserDetailModalProps) {
+function UserDetailModal({ user, loading, error, onClose, onChangeName, onToggleActive, onToggleCanPostAsUser, onUnlinkGmail, onResetPassword, onSave }: UserDetailModalProps) {
   if (!user) return null;
 
   const canPostAsUser = user.preferredRole === "WRITER";
@@ -330,6 +347,13 @@ function UserDetailModal({ user, loading, error, onClose, onChangeName, onToggle
                 <span>Gỡ Gmail</span>
               </button>
               <button
+                className="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                onClick={onResetPassword}
+              >
+                <Shield size={16} className="text-amber-600" />
+                <span>Cấp lại mật khẩu</span>
+              </button>
+              <button
                 className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-medium transition ${
                   user.isActive
                     ? "border-red-100 bg-red-50 text-red-600 hover:bg-red-100"
@@ -365,6 +389,12 @@ function UserDetailModal({ user, loading, error, onClose, onChangeName, onToggle
                   </button>
                 </div>
               </div>
+
+              {user.temporaryPassword && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-2">
+                  Mật khẩu tạm hiện tại: <span className="font-bold">{user.temporaryPassword}</span>
+                </div>
+              )}
             </div>
           </section>
 
@@ -418,6 +448,7 @@ export default function AdminUsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createMsnv, setCreateMsnv] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -456,11 +487,13 @@ export default function AdminUsersPage() {
     mutationFn: () =>
       apiRequest("/admin/users", token!, "POST", {
         fullName: createName.trim(),
-        msnv: createMsnv.trim().toUpperCase()
+        msnv: createMsnv.trim().toUpperCase(),
+        initialPassword: createPassword.trim() || undefined
       }),
     onSuccess: async () => {
       setCreateName("");
       setCreateMsnv("");
+      setCreatePassword("");
       setCreateOpen(false);
       setCreateError(null);
       await invalidateUsers();
@@ -493,6 +526,17 @@ export default function AdminUsersPage() {
     },
     onError: (error) => {
       setDetailError(error instanceof Error ? error.message : "Không thể gỡ Gmail");
+    }
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: (employeeId: string) => apiRequest<ManagedUser>(`/admin/users/${employeeId}/reset-password`, token!, "POST"),
+    onSuccess: async (updated) => {
+      setSelectedUser(updated);
+      await invalidateUsers();
+    },
+    onError: (error) => {
+      setDetailError(error instanceof Error ? error.message : "Không thể cấp lại mật khẩu");
     }
   });
 
@@ -656,7 +700,14 @@ export default function AdminUsersPage() {
                             </div>
                           </td>
                           <td className="px-5 py-4 text-slate-600">{user.msnv}</td>
-                          <td className="px-5 py-4 text-slate-600">{user.linkedUser?.email || <span className="text-slate-400">Chưa liên kết</span>}</td>
+                          <td className="px-5 py-4 text-slate-600">
+                            {user.linkedUser?.email || <span className="text-slate-400">Chưa liên kết</span>}
+                            {user.temporaryPassword && (
+                              <div className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                Mật khẩu cấp: {user.temporaryPassword}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-5 py-4">
                             <StatusBadge user={user} />
                           </td>
@@ -723,23 +774,26 @@ export default function AdminUsersPage() {
         open={createOpen}
         name={createName}
         msnv={createMsnv}
+        password={createPassword}
         loading={createUserMutation.isPending}
         error={createError}
         onChangeName={setCreateName}
         onChangeMsnv={setCreateMsnv}
+        onChangePassword={setCreatePassword}
         onClose={() => setCreateOpen(false)}
         onSubmit={() => createUserMutation.mutate()}
       />
 
       <UserDetailModal
         user={selectedUser}
-        loading={updateUserMutation.isPending || unlinkGmailMutation.isPending}
+        loading={updateUserMutation.isPending || unlinkGmailMutation.isPending || resetPasswordMutation.isPending}
         error={detailError}
         onClose={() => setSelectedUser(null)}
         onChangeName={(value) => setSelectedUser((prev) => (prev ? { ...prev, fullName: value } : prev))}
         onToggleActive={() => selectedUser && void toggleUserActive(selectedUser)}
         onToggleCanPostAsUser={() => void handleToggleCanPostAsUser()}
         onUnlinkGmail={() => selectedUser && void unlinkGmail(selectedUser)}
+        onResetPassword={() => selectedUser && void resetPasswordMutation.mutateAsync(selectedUser.id)}
         onSave={() => void handleSaveDetail()}
       />
     </main>

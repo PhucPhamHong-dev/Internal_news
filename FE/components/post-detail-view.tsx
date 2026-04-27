@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Heart, MoreHorizontal, PenSquare, Pin, SendHorizontal, Trash2, X } from "lucide-react";
 import { apiRequest } from "./api";
 import { Profile } from "./auth-store";
+import { PostContentBlocks } from "./post-content-blocks";
 import { capturePostQueryState, restorePostQueryState, updatePostCounters } from "./post-query-cache";
 import {
   AnonymousAvatar,
@@ -53,6 +54,15 @@ type HydratedComment = CommentItem & {
 
 const COMMENT_PAGE_SIZE = 5;
 const REPLY_PAGE_SIZE = 3;
+const REACTIONS = [
+  { type: "LIKE", icon: "👍", label: "Thích" },
+  { type: "LOVE", icon: "❤️", label: "Yêu thích" },
+  { type: "CARE", icon: "🥰", label: "Quan tâm" },
+  { type: "HAHA", icon: "😄", label: "Haha" },
+  { type: "WOW", icon: "😮", label: "Wow" },
+  { type: "SAD", icon: "😢", label: "Buồn" },
+  { type: "ANGRY", icon: "😡", label: "Giận" }
+] as const;
 
 function CommentsSkeleton({ count = 3 }: { count?: number }) {
   return (
@@ -117,7 +127,9 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
   const [editContent, setEditContent] = useState(post.content);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const reactionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canPin = useMemo(() => {
     if (profile.role === "ADMIN") return true;
@@ -129,6 +141,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     if (profile.role === "ADMIN") return true;
     return profile.role === "WRITER" && post.authorId === profile.id;
   }, [post.authorId, profile.id, profile.role]);
+  const activePostReaction = REACTIONS.find((item) => item.type === post.myReaction);
 
   const commentsQuery = useInfiniteQuery({
     queryKey: commentsQueryKey,
@@ -157,6 +170,12 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     if (menuOpen) document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [menuOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
+    };
+  }, []);
 
   const comments = useMemo<HydratedComment[]>(() => {
     const baseItems = commentsQuery.data?.pages.flatMap((page) => page.items) ?? [];
@@ -199,28 +218,42 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     setIdentityError(null);
     setIdentityData(null);
   };
-  const togglePostLike = async () => {
-    const nextLiked = !post.likedByMe;
+
+  const openReactions = () => {
+    if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
+    setReactionsOpen(true);
+  };
+
+  const closeReactions = () => {
+    if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
+    reactionsTimerRef.current = setTimeout(() => setReactionsOpen(false), 220);
+  };
+
+  const setPostReaction = async (reactionType: (typeof REACTIONS)[number]["type"] | null) => {
+    const nextLiked = Boolean(reactionType);
     const snapshot = capturePostQueryState(queryClient, post.id);
 
     updatePostCounters(queryClient, post.id, {
       likedByMe: nextLiked,
-      likeCount: post.likeCount + (nextLiked ? 1 : -1)
+      likeCount: post.likeCount + (post.likedByMe === nextLiked ? 0 : nextLiked ? 1 : -1),
+      myReaction: reactionType
     });
 
     try {
-      if (nextLiked) {
-        await apiRequest(`/posts/${post.id}/like`, token, "POST");
+      if (reactionType) {
+        await apiRequest(`/posts/${post.id}/reaction`, token, "POST", { type: reactionType });
       } else {
-        await apiRequest(`/posts/${post.id}/like`, token, "DELETE");
+        await apiRequest(`/posts/${post.id}/reaction`, token, "DELETE");
       }
     } catch (error) {
       restorePostQueryState(queryClient, snapshot);
-      window.alert(error instanceof Error ? error.message : "Không thể cập nhật lượt thích");
+      window.alert(error instanceof Error ? error.message : "Không thể cập nhật cảm xúc");
     }
   };
 
   const toggleCommentLike = async (commentId: string, likedByMe: boolean) => {
+    if (commentId.startsWith("optimistic-")) return;
+
     const snapshot = queryClient.getQueryData<InfiniteData<CommentConnection>>(commentsQueryKey);
 
     queryClient.setQueryData<InfiniteData<CommentConnection>>(commentsQueryKey, (current) =>
@@ -466,6 +499,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     <div className={`mt-2 flex items-center gap-4 text-sm text-slate-500 ${isReply ? "pl-12" : ""}`}>
       <button
         className={`inline-flex items-center gap-1.5 transition hover:text-slate-700 ${item.likedByMe ? "text-red-500" : ""}`}
+        disabled={Boolean(item.optimistic || item.sendFailed || item.id.startsWith("optimistic-"))}
         onClick={() => void toggleCommentLike(item.id, item.likedByMe)}
       >
         <Heart size={15} fill={item.likedByMe ? "#EF4444" : "none"} />
@@ -482,9 +516,8 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     <>
       <article className="card overflow-hidden">
         <div className="flex gap-4 px-5 py-5 sm:px-6">
-          <div className="flex w-12 shrink-0 flex-col items-center">
+          <div className="flex w-12 shrink-0 items-start justify-center pt-0.5">
             <Avatar name={post.authorName} avatarUrl={post.authorAvatar} />
-            <div className="mt-3 w-px flex-1 bg-slate-200" />
           </div>
 
           <div className="min-w-0 flex-1">
@@ -558,27 +591,37 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
               </div>
             </div>
 
-            <div className="mt-3 whitespace-pre-wrap text-[15px] leading-7 text-slate-700">{post.content}</div>
-
-            {!!post.media.length && (
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {post.media.map((media) => (
-                  <div key={media.id} className="overflow-hidden rounded-[24px] border border-slate-200 bg-slate-100 shadow-sm">
-                    {media.type === "IMAGE" ? (
-                      <img src={media.url} alt="post-media" className="h-[320px] w-full object-cover" />
-                    ) : (
-                      <video src={media.url} className="h-[320px] w-full object-cover" controls />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            <PostContentBlocks blocks={post.blocks} fallbackContent={post.content} fallbackMedia={post.media} />
 
             <div className="mt-5 flex items-center gap-6 text-[14px] text-slate-500">
-              <button className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "text-red-500" : ""}`} onClick={() => void togglePostLike()}>
-                <Heart size={20} fill={post.likedByMe ? "#EF4444" : "none"} color={post.likedByMe ? "#EF4444" : "currentColor"} />
-                <span>{post.likeCount}</span>
-              </button>
+              <div className="relative" onMouseEnter={openReactions} onMouseLeave={closeReactions}>
+                <button
+                  className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "text-blue-600" : ""}`}
+                  onClick={() => void setPostReaction(post.likedByMe ? null : "LIKE")}
+                >
+                  {activePostReaction ? <span className="text-lg leading-none">{activePostReaction.icon}</span> : <Heart size={20} />}
+                  <span>{post.likeCount}</span>
+                </button>
+                <div
+                  className={`absolute bottom-7 left-0 z-20 flex gap-1 rounded-full border border-slate-200 bg-white px-2 py-1.5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.38)] transition ${
+                    reactionsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"
+                  }`}
+                >
+                  {REACTIONS.map((reaction) => (
+                    <button
+                      key={reaction.type}
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-xl transition hover:-translate-y-1 hover:bg-slate-50"
+                      title={reaction.label}
+                      onClick={() => {
+                        setReactionsOpen(false);
+                        void setPostReaction(reaction.type);
+                      }}
+                    >
+                      {reaction.icon}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <a href="#comments" className="inline-flex items-center gap-2 transition hover:text-slate-700">
                 <span>{post.commentCount} bình luận</span>

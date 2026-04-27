@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
+import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { MediaTypeEnum } from "../../common/enums";
 
@@ -23,7 +23,53 @@ class MediaInputDto {
   thumbnailPublicId?: string;
 
   @IsOptional()
+  @IsString()
+  caption?: string;
+
+  @IsOptional()
+  @IsString()
+  clientBlockId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  sortOrder?: number;
+
+  @IsOptional()
   sizeBytes?: number;
+}
+
+class PostContentBlockDto {
+  @IsString()
+  @IsNotEmpty()
+  id!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  type!: "paragraph" | "image" | "video";
+
+  @IsOptional()
+  @IsString()
+  text?: string;
+
+  @IsOptional()
+  @IsString()
+  url?: string;
+
+  @IsOptional()
+  @IsString()
+  thumbnailUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  publicId?: string;
+
+  @IsOptional()
+  @IsString()
+  thumbnailPublicId?: string;
+
+  @IsOptional()
+  @IsString()
+  caption?: string;
 }
 
 export class CreatePostDto {
@@ -43,4 +89,11 @@ export class CreatePostDto {
   @ValidateNested({ each: true })
   @Type(() => MediaInputDto)
   media?: MediaInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(80)
+  @ValidateNested({ each: true })
+  @Type(() => PostContentBlockDto)
+  blocks?: PostContentBlockDto[];
 }

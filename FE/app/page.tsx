@@ -2,8 +2,9 @@
 
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CredentialResponse, GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
+import type { FormEvent } from "react";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, KeyRound, Plus } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import { apiRequest } from "@/components/api";
@@ -22,6 +23,12 @@ type NotificationItem = {
   message: string;
   createdAt: string;
   isRead: boolean;
+};
+
+type ArchiveYear = {
+  year: number;
+  total: number;
+  months: Array<{ month: number; count: number }>;
 };
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
@@ -62,8 +69,15 @@ function HomePageContent() {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [composerOpenSignal, setComposerOpenSignal] = useState(0);
+  const [loginMsnv, setLoginMsnv] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [impersonateTarget, setImpersonateTarget] = useState<{ employeeId: string; fullName: string; msnv: string } | null>(null);
   const [prefetchNode, setPrefetchNode] = useState<HTMLDivElement | null>(null);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const handledPanelRef = useRef<string | null>(null);
   const scrollRestoredRef = useRef(false);
   const debouncedSearch = useDebouncedValue(search, 350);
@@ -93,15 +107,24 @@ function HomePageContent() {
   }, [initialized, token, clearAuth, setProfile]);
 
   const feedQuery = useInfiniteQuery({
-    queryKey: ["feed", profile?.id],
+    queryKey: ["feed", profile?.id, selectedYear, selectedMonth],
     enabled: Boolean(token && profile?.linked && debouncedSearch.trim() === ""),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
       const query = new URLSearchParams({ limit: "5" });
       if (pageParam) query.set("cursor", pageParam);
+      if (selectedYear) query.set("year", String(selectedYear));
+      if (selectedMonth) query.set("month", String(selectedMonth));
       return apiRequest<FeedConnection>(`/posts?${query.toString()}`, token!, "GET", undefined, { signal });
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined
+  });
+
+  const archiveQuery = useQuery({
+    queryKey: ["post-archive", profile?.id],
+    enabled: Boolean(token && profile?.linked),
+    queryFn: ({ signal }) => apiRequest<ArchiveYear[]>("/posts/archive", token!, "GET", undefined, { signal }),
+    staleTime: 5 * 60 * 1000
   });
 
   const searchQuery = useQuery({
@@ -127,6 +150,8 @@ function HomePageContent() {
   const feedPosts = useMemo(() => feedQuery.data?.pages.flatMap((page) => page.items) ?? [], [feedQuery.data]);
   const searchResults = useMemo(() => searchQuery.data?.results ?? [], [searchQuery.data?.results]);
   const visiblePosts = debouncedSearch.trim() ? searchResults : feedPosts;
+  const archiveYears = archiveQuery.data ?? [];
+  const activeArchiveYear = archiveYears.find((item) => item.year === selectedYear) ?? archiveYears[0] ?? null;
   const visibleSuggestions = useMemo<SearchPreview[]>(() => {
     if (debouncedSearch.trim()) {
       return searchQuery.data?.results.map((item) => ({
@@ -251,6 +276,36 @@ function HomePageContent() {
     }
   };
 
+  const handleEmployeeLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoading(true);
+    setLoginError(null);
+    try {
+      const response = await apiRequest<{ token: string; profile: Profile }>("/auth/employee-login", null, "POST", {
+        msnv: loginMsnv.trim().toUpperCase(),
+        password: loginPassword
+      });
+      saveAuth(response.token, response.profile);
+      setLoginPassword("");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Không thể đăng nhập bằng MSNV");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForceChangePassword = async () => {
+    if (!token || !profile) return;
+    setChangePasswordError(null);
+    try {
+      await apiRequest("/auth/change-password", token, "POST", { newPassword });
+      saveAuth(token, { ...profile, mustChangePassword: false });
+      setNewPassword("");
+    } catch (error) {
+      setChangePasswordError(error instanceof Error ? error.message : "Không thể đổi mật khẩu");
+    }
+  };
+
   const handleMsnvSubmit = async (msnv: string) => {
     if (!token) return;
     const response = await apiRequest<{ token: string; profile: Profile }>("/auth/link-msnv", token, "POST", { msnv });
@@ -285,6 +340,40 @@ function HomePageContent() {
           <div className="mt-6 flex justify-center">
             <GoogleLogin onSuccess={handleGoogleLogin} onError={() => undefined} />
           </div>
+          <div className="my-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />
+            hoặc
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+          <form className="space-y-3 text-left" onSubmit={handleEmployeeLogin}>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Mã nhân viên</label>
+              <input
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold uppercase text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
+                value={loginMsnv}
+                onChange={(event) => setLoginMsnv(event.target.value.toUpperCase())}
+                placeholder="VD: EMP0001"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Mật khẩu</label>
+              <input
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
+                type="password"
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                placeholder="Mật khẩu được cấp"
+              />
+            </div>
+            {loginError && <p className="text-sm text-red-600">{loginError}</p>}
+            <button
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loading || !loginMsnv.trim() || !loginPassword}
+            >
+              <KeyRound size={16} />
+              Đăng nhập bằng MSNV
+            </button>
+          </form>
           {loading && <p className="mt-4 text-sm text-slate-500">Äang xÃ¡c thá»±c...</p>}
         </section>
       </main>
@@ -303,6 +392,67 @@ function HomePageContent() {
           DÃ nh cho báº¡n
           <ChevronDown size={26} className="text-slate-400" />
         </div>
+
+        {archiveYears.length > 0 && (
+          <section className="card mb-5 px-4 py-4 sm:px-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-slate-500">Lưu trữ bản tin</h2>
+                <p className="mt-1 text-sm text-slate-500">Lọc theo năm và từng tháng để tìm lại bản tin nhanh hơn.</p>
+              </div>
+              {(selectedYear || selectedMonth) && (
+                <button
+                  className="rounded-full border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+                  onClick={() => {
+                    setSelectedYear(null);
+                    setSelectedMonth(null);
+                  }}
+                >
+                  Tất cả
+                </button>
+              )}
+            </div>
+
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+              {archiveYears.map((item) => (
+                <button
+                  key={item.year}
+                  className={`shrink-0 rounded-full px-4 py-2 text-sm font-bold transition ${
+                    selectedYear === item.year
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                  }`}
+                  onClick={() => {
+                    setSelectedYear(item.year);
+                    setSelectedMonth(null);
+                  }}
+                >
+                  {item.year}
+                  <span className="ml-2 opacity-70">{item.total}</span>
+                </button>
+              ))}
+            </div>
+
+            {activeArchiveYear && selectedYear && (
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+                {activeArchiveYear.months.map((item) => (
+                  <button
+                    key={item.month}
+                    className={`shrink-0 rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                      selectedMonth === item.month
+                        ? "bg-slate-900 text-white"
+                        : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
+                    }`}
+                    onClick={() => setSelectedMonth(item.month)}
+                  >
+                    Tháng {item.month}
+                    <span className="ml-2 opacity-70">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <Composer
           token={token}
@@ -398,6 +548,35 @@ function HomePageContent() {
           void apiRequest(`/notifications/${id}/read`, token, "POST").then(() => fetchNotifications(token));
         }}
       />
+
+      {profile.mustChangePassword && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/18 px-4 backdrop-blur-sm">
+          <section className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.28)]">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+              <KeyRound size={22} />
+            </div>
+            <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">Đổi mật khẩu lần đầu</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Vì bạn đăng nhập bằng mật khẩu được cấp, hãy đặt mật khẩu mới trước khi tiếp tục sử dụng hệ thống.
+            </p>
+            <input
+              className="mt-5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              placeholder="Mật khẩu mới, tối thiểu 6 ký tự"
+            />
+            {changePasswordError && <p className="mt-3 text-sm text-red-600">{changePasswordError}</p>}
+            <button
+              className="mt-5 w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={newPassword.length < 6}
+              onClick={() => void handleForceChangePassword()}
+            >
+              Lưu mật khẩu mới
+            </button>
+          </section>
+        </div>
+      )}
 
       {!profile.linked && <MsnvModal onSubmit={handleMsnvSubmit} loading={loading} />}
     </>

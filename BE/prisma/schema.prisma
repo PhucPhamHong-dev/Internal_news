@@ -25,14 +25,28 @@ enum NotificationType {
   COMMENT_REPLIED
 }
 
+enum ReactionType {
+  LIKE
+  LOVE
+  CARE
+  HAHA
+  WOW
+  SAD
+  ANGRY
+}
+
 model EmployeeMaster {
-  id         String   @id @default(cuid())
-  msnv       String   @unique
-  fullName   String
-  isActive   Boolean  @default(true)
-  preferredRole Role  @default(VIEWER)
-  createdAt  DateTime @default(now())
-  linkedUser User?
+  id                       String   @id @default(cuid())
+  msnv                     String   @unique
+  fullName                 String
+  isActive                 Boolean  @default(true)
+  preferredRole            Role     @default(VIEWER)
+  passwordHash             String?
+  temporaryPasswordPreview String?
+  mustChangePassword       Boolean  @default(false)
+  passwordChangedAt        DateTime?
+  createdAt                DateTime @default(now())
+  linkedUser               User?
 
   @@index([isActive, msnv])
   @@index([preferredRole, createdAt])
@@ -55,6 +69,7 @@ model User {
   notifications Notification[]
   reads         NotificationRead[]
   anonIdentites AnonymousIdentity[]
+  themeKey      String              @default("blue")
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 }
@@ -65,6 +80,7 @@ model Post {
   author      User      @relation(fields: [authorId], references: [id])
   title       String
   content     String
+  contentBlocks Json?
   media       PostMedia[]
   likes       PostLike[]
   views       PostView[]
@@ -89,8 +105,12 @@ model PostMedia {
   thumbnailUrl String?
   publicId String
   thumbnailPublicId String?
+  sortOrder Int @default(0)
+  caption String?
+  clientBlockId String?
   createdAt DateTime @default(now())
 
+  @@index([postId, sortOrder])
   @@index([postId, createdAt])
 }
 
@@ -98,6 +118,7 @@ model PostLike {
   id        String   @id @default(cuid())
   postId    String
   userId    String
+  reactionType ReactionType @default(LIKE)
   post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())

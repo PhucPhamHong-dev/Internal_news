@@ -1,10 +1,11 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Prisma } from "@prisma/client";
 import { v2 as cloudinary } from "cloudinary";
 import { CacheKeys } from "../cache/cache-keys";
 import { RedisService } from "../cache/redis.service";
 import { AuthUser } from "../common/current-user.decorator";
-import { MediaTypeEnum, NotificationTypeEnum, RoleEnum } from "../common/enums";
+import { MediaTypeEnum, NotificationTypeEnum, ReactionTypeEnum, RoleEnum } from "../common/enums";
 import { NotificationsGateway } from "../notifications/notifications.gateway";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreatePostDto } from "./dto/create-post.dto";
@@ -21,7 +22,28 @@ type FeedOptions = {
   limit?: number;
   cursor?: string;
   excludeId?: string;
+  year?: number;
+  month?: number;
 };
+
+type PostContentBlock =
+  | { id: string; type: "paragraph"; text: string }
+  | {
+      id: string;
+      type: "image";
+      url: string;
+      thumbnailUrl?: string | null;
+      publicId: string;
+      thumbnailPublicId?: string | null;
+      caption?: string | null;
+    }
+  | {
+      id: string;
+      type: "video";
+      url: string;
+      publicId: string;
+      caption?: string | null;
+    };
 
 type FeedSummaryRecord = {
   id: string;
@@ -42,6 +64,9 @@ type FeedSummaryRecord = {
     thumbnailUrl?: string | null;
     publicId: string;
     thumbnailPublicId?: string | null;
+    caption?: string | null;
+    clientBlockId?: string | null;
+    sortOrder?: number;
   }>;
   _count: {
     likes: number;
@@ -64,7 +89,8 @@ type FeedSummaryItem = {
   likeCount: number;
   commentCount: number;
   viewCount: number;
-  media: Array<{ id: string; type: string; url: string; publicId: string }>;
+  media: Array<{ id: string; type: string; url: string; publicId: string; caption?: string | null }>;
+  myReaction: ReactionTypeEnum | null;
 };
 
 type FeedBatchCache = {
@@ -89,7 +115,18 @@ type PostDetailCache = {
   pinPriority: number | null;
   isPinned: boolean;
   createdAt: string;
-  media: Array<{ id: string; type: string; url: string; publicId: string }>;
+  blocks: PostContentBlock[];
+  media: Array<{
+    id: string;
+    type: string;
+    url: string;
+    thumbnailUrl?: string | null;
+    publicId: string;
+    thumbnailPublicId?: string | null;
+    caption?: string | null;
+    clientBlockId?: string | null;
+    sortOrder?: number;
+  }>;
 };
 
 @Injectable()
@@ -124,13 +161,17 @@ export class PostsService {
         authorId: user.sub,
         title: dto.title.trim(),
         content: dto.content.trim(),
+        contentBlocks: this.normalizeBlocks(dto.blocks, dto.content, media),
         media: {
-          create: media.map((item) => ({
+          create: media.map((item, index) => ({
             type: item.type,
             url: item.url,
             publicId: item.publicId,
             thumbnailUrl: item.thumbnailUrl,
-            thumbnailPublicId: item.thumbnailPublicId
+            thumbnailPublicId: item.thumbnailPublicId,
+            caption: item.caption,
+            clientBlockId: item.clientBlockId,
+            sortOrder: item.sortOrder ?? index
           }))
         }
       },
@@ -143,13 +184,17 @@ export class PostsService {
           }
         },
         media: {
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             type: true,
             url: true,
             thumbnailUrl: true,
-            publicId: true
+            publicId: true,
+            thumbnailPublicId: true,
+            caption: true,
+            clientBlockId: true,
+            sortOrder: true
           }
         }
       }
@@ -165,7 +210,8 @@ export class PostsService {
     return {
       ...this.toPostDetailCache(post),
       ...counts,
-      likedByMe: false
+      likedByMe: false,
+      myReaction: null
     };
   }
 
@@ -173,7 +219,9 @@ export class PostsService {
     const limit = this.normalizeFeedLimit(options.limit);
     const cursor = options.cursor ?? null;
     const excludeId = options.excludeId ?? null;
-    const cacheKey = CacheKeys.feedBatch(limit, cursor, excludeId);
+    const archiveRange = this.getArchiveDateRange(options.year, options.month);
+    const archiveKey = archiveRange ? `${options.year}-${options.month ?? "all"}` : null;
+    const cacheKey = CacheKeys.feedBatch(limit, cursor, excludeId, archiveKey);
 
     const cached = await this.redis.getJson<FeedBatchCache>(cacheKey);
     if (cached) {
@@ -184,8 +232,8 @@ export class PostsService {
     }
 
     const batch = cursor
-      ? await this.getNormalFeedBatch({ limit, cursor, excludeId })
-      : await this.getFirstFeedBatch({ limit, excludeId });
+      ? await this.getNormalFeedBatch({ limit, cursor, excludeId, archiveRange })
+      : await this.getFirstFeedBatch({ limit, excludeId, archiveRange });
 
     await this.redis.setJson(cacheKey, batch, FEED_CACHE_TTL_SECONDS);
 
@@ -211,13 +259,17 @@ export class PostsService {
             }
           },
           media: {
-            orderBy: { createdAt: "asc" },
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             select: {
               id: true,
               type: true,
               url: true,
               thumbnailUrl: true,
-              publicId: true
+              publicId: true,
+              thumbnailPublicId: true,
+              caption: true,
+              clientBlockId: true,
+              sortOrder: true
             }
           }
         }
@@ -231,15 +283,16 @@ export class PostsService {
       await this.redis.setJson(cacheKey, cached, POST_DETAIL_CACHE_TTL_SECONDS);
     }
 
-    const [counts, likedByMe] = await Promise.all([
+    const [counts, myReaction] = await Promise.all([
       this.getPostCounts(postId),
-      this.hasLikedPost(userId, postId)
+      this.getPostReaction(userId, postId)
     ]);
 
     return {
       ...cached,
       ...counts,
-      likedByMe
+      likedByMe: Boolean(myReaction),
+      myReaction
     };
   }
 
@@ -249,6 +302,31 @@ export class PostsService {
       excludeId: postId
     });
     return batch.items;
+  }
+
+  async getArchive() {
+    const groups = await this.prisma.post.groupBy({
+      by: ["createdAt"],
+      _count: { _all: true },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const years = new Map<number, Map<number, number>>();
+    groups.forEach((group) => {
+      const year = group.createdAt.getFullYear();
+      const month = group.createdAt.getMonth() + 1;
+      const months = years.get(year) ?? new Map<number, number>();
+      months.set(month, (months.get(month) ?? 0) + group._count._all);
+      years.set(year, months);
+    });
+
+    return Array.from(years.entries()).map(([year, months]) => ({
+      year,
+      total: Array.from(months.values()).reduce((sum, value) => sum + value, 0),
+      months: Array.from(months.entries())
+        .sort(([a], [b]) => b - a)
+        .map(([month, count]) => ({ month, count }))
+    }));
   }
 
   async updatePost(user: AuthUser, postId: string, dto: UpdatePostDto) {
@@ -265,7 +343,8 @@ export class PostsService {
       where: { id: postId },
       data: {
         title: dto.title.trim(),
-        content: dto.content.trim()
+        content: dto.content.trim(),
+        contentBlocks: dto.blocks ? this.normalizeBlocks(dto.blocks, dto.content, []) : Prisma.JsonNull
       },
       include: {
         author: {
@@ -276,13 +355,17 @@ export class PostsService {
           }
         },
         media: {
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             type: true,
             url: true,
             thumbnailUrl: true,
-            publicId: true
+            publicId: true,
+            thumbnailPublicId: true,
+            caption: true,
+            clientBlockId: true,
+            sortOrder: true
           }
         }
       }
@@ -294,7 +377,8 @@ export class PostsService {
     return {
       ...this.toPostDetailCache(updated),
       ...counts,
-      likedByMe: await this.hasLikedPost(user.sub, postId)
+      likedByMe: await this.hasLikedPost(user.sub, postId),
+      myReaction: await this.getPostReaction(user.sub, postId)
     };
   }
 
@@ -378,6 +462,10 @@ export class PostsService {
   }
 
   async likePost(user: AuthUser, postId: string) {
+    return this.setReaction(user, postId, ReactionTypeEnum.LIKE);
+  }
+
+  async setReaction(user: AuthUser, postId: string, reactionType: ReactionTypeEnum) {
     const post = await this.prisma.post.findUnique({
       where: { id: postId },
       include: { author: true }
@@ -393,10 +481,15 @@ export class PostsService {
 
     if (!existing) {
       await this.prisma.postLike.create({
-        data: { postId, userId: user.sub }
+        data: { postId, userId: user.sub, reactionType }
       });
       await this.bumpPostCounts(postId, { likeCount: 1 });
       await this.invalidateFeedCaches();
+    } else {
+      await this.prisma.postLike.update({
+        where: { postId_userId: { postId, userId: user.sub } },
+        data: { reactionType }
+      });
     }
 
     if (post.author.role === RoleEnum.WRITER && post.authorId !== user.sub) {
@@ -411,7 +504,8 @@ export class PostsService {
       this.notificationsGateway.pushToUser(post.authorId, notification);
     }
 
-    return { ok: true };
+    const counts = await this.getPostCounts(postId);
+    return { ok: true, likedByMe: true, myReaction: reactionType, ...counts };
   }
 
   async unlikePost(userId: string, postId: string) {
@@ -420,7 +514,8 @@ export class PostsService {
       await this.bumpPostCounts(postId, { likeCount: -1 });
       await this.invalidateFeedCaches();
     }
-    return { ok: true };
+    const counts = await this.getPostCounts(postId);
+    return { ok: true, likedByMe: false, myReaction: null, ...counts };
   }
 
   async search(userId: string, query: string) {
@@ -445,13 +540,14 @@ export class PostsService {
         },
         media: {
           take: 1,
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             type: true,
             url: true,
             thumbnailUrl: true,
-            publicId: true
+            publicId: true,
+            caption: true
           }
         },
         _count: { select: { likes: true, comments: true, views: true } }
@@ -487,10 +583,27 @@ export class PostsService {
     return Math.max(1, Math.min(limit, MAX_FEED_LIMIT));
   }
 
-  private async getFirstFeedBatch(options: { limit: number; excludeId: string | null }): Promise<FeedBatchCache> {
+  private getArchiveDateRange(year?: number, month?: number) {
+    if (!year || Number.isNaN(year)) return null;
+    const safeMonth = month && !Number.isNaN(month) ? Math.min(12, Math.max(1, month)) : null;
+    const start = safeMonth ? new Date(Date.UTC(year, safeMonth - 1, 1)) : new Date(Date.UTC(year, 0, 1));
+    const end = safeMonth ? new Date(Date.UTC(year, safeMonth, 1)) : new Date(Date.UTC(year + 1, 0, 1));
+    return { start, end };
+  }
+
+  private archiveWhere(range: { start: Date; end: Date } | null | undefined) {
+    return range ? { createdAt: { gte: range.start, lt: range.end } } : {};
+  }
+
+  private async getFirstFeedBatch(options: {
+    limit: number;
+    excludeId: string | null;
+    archiveRange: ReturnType<PostsService["getArchiveDateRange"]>;
+  }): Promise<FeedBatchCache> {
     const pinnedRecords = await this.prisma.post.findMany({
       where: {
         pinPriority: { not: null },
+        ...this.archiveWhere(options.archiveRange),
         ...(options.excludeId ? { id: { not: options.excludeId } } : {})
       },
       orderBy: [{ pinPriority: "asc" }, { pinnedAt: "desc" }, { createdAt: "desc" }],
@@ -504,13 +617,14 @@ export class PostsService {
         },
         media: {
           take: 1,
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             type: true,
             url: true,
             thumbnailUrl: true,
-            publicId: true
+            publicId: true,
+            caption: true
           }
         },
         _count: { select: { likes: true, comments: true, views: true } }
@@ -530,7 +644,8 @@ export class PostsService {
     const normalBatch = await this.getNormalFeedBatch({
       limit: normalLimit,
       cursor: null,
-      excludeId: options.excludeId
+      excludeId: options.excludeId,
+      archiveRange: options.archiveRange
     });
 
     return {
@@ -539,10 +654,16 @@ export class PostsService {
     };
   }
 
-  private async getNormalFeedBatch(options: { limit: number; cursor: string | null; excludeId: string | null }): Promise<FeedBatchCache> {
+  private async getNormalFeedBatch(options: {
+    limit: number;
+    cursor: string | null;
+    excludeId: string | null;
+    archiveRange?: ReturnType<PostsService["getArchiveDateRange"]>;
+  }): Promise<FeedBatchCache> {
     const posts = await this.prisma.post.findMany({
       where: {
         pinPriority: null,
+        ...this.archiveWhere(options.archiveRange),
         ...(options.excludeId ? { id: { not: options.excludeId } } : {})
       },
       take: options.limit + 1,
@@ -558,12 +679,14 @@ export class PostsService {
         },
         media: {
           take: 1,
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             type: true,
             url: true,
-            publicId: true
+            thumbnailUrl: true,
+            publicId: true,
+            caption: true
           }
         },
         _count: { select: { likes: true, comments: true, views: true } }
@@ -580,21 +703,22 @@ export class PostsService {
   }
 
   private async attachLikedState(items: FeedSummaryItem[], userId: string) {
-    if (items.length === 0) return items.map((item) => ({ ...item, likedByMe: false }));
+    if (items.length === 0) return items.map((item) => ({ ...item, likedByMe: false, myReaction: null }));
 
-    const likedPosts = await this.prisma.postLike.findMany({
+    const reactions = await this.prisma.postLike.findMany({
       where: {
         userId,
         postId: { in: items.map((item) => item.id) }
       },
-      select: { postId: true }
+      select: { postId: true, reactionType: true }
     });
 
-    const likedIds = new Set(likedPosts.map((item) => item.postId));
+    const reactionByPost = new Map(reactions.map((item) => [item.postId, item.reactionType]));
 
     return items.map((item) => ({
       ...item,
-      likedByMe: likedIds.has(item.id)
+      likedByMe: reactionByPost.has(item.id),
+      myReaction: reactionByPost.get(item.id) ?? null
     }));
   }
 
@@ -604,6 +728,14 @@ export class PostsService {
       select: { id: true }
     });
     return Boolean(liked);
+  }
+
+  private async getPostReaction(userId: string, postId: string) {
+    const reaction = await this.prisma.postLike.findUnique({
+      where: { postId_userId: { postId, userId } },
+      select: { reactionType: true }
+    });
+    return reaction?.reactionType ?? null;
   }
 
   private async getPostCounts(postId: string): Promise<PostCounts> {
@@ -665,7 +797,7 @@ export class PostsService {
         createdAt: true,
         media: {
           take: 1,
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: { url: true, thumbnailUrl: true, type: true }
         }
       }
@@ -696,11 +828,13 @@ export class PostsService {
       likeCount: post._count.likes,
       commentCount: post._count.comments,
       viewCount: post._count.views,
+      myReaction: null,
       media: post.media.map((item) => ({
         id: item.id,
         type: item.type,
         url: item.thumbnailUrl ?? item.url,
-        publicId: item.publicId
+        publicId: item.publicId,
+        caption: item.caption
       }))
     };
   }
@@ -710,11 +844,34 @@ export class PostsService {
     authorId: string;
     title: string;
     content: string;
+    contentBlocks?: unknown;
     createdAt: Date;
     pinPriority: number | null;
     author: { fullName: string; avatarUrl: string | null; role: string };
-    media: Array<{ id: string; type: string; url: string; publicId: string; thumbnailUrl?: string | null }>;
+    media: Array<{
+      id: string;
+      type: string;
+      url: string;
+      thumbnailUrl?: string | null;
+      publicId: string;
+      thumbnailPublicId?: string | null;
+      caption?: string | null;
+      clientBlockId?: string | null;
+      sortOrder?: number;
+    }>;
   }): PostDetailCache {
+    const media = post.media.map((item) => ({
+      id: item.id,
+      type: item.type,
+      url: item.url,
+      thumbnailUrl: item.thumbnailUrl,
+      publicId: item.publicId,
+      thumbnailPublicId: item.thumbnailPublicId,
+      caption: item.caption,
+      clientBlockId: item.clientBlockId,
+      sortOrder: item.sortOrder
+    }));
+
     return {
       id: post.id,
       authorId: post.authorId,
@@ -726,13 +883,160 @@ export class PostsService {
       pinPriority: post.pinPriority,
       isPinned: post.pinPriority !== null,
       createdAt: post.createdAt.toISOString(),
-      media: post.media.map((item) => ({
-        id: item.id,
+      blocks: this.resolvePostBlocks(post.contentBlocks, post.content, media),
+      media
+    };
+  }
+
+  private normalizeBlocks(
+    blocks: unknown[] | undefined,
+    content: string,
+    media: Array<{
+      type: MediaTypeEnum;
+      url: string;
+      publicId: string;
+      thumbnailUrl?: string;
+      thumbnailPublicId?: string;
+      caption?: string;
+      clientBlockId?: string;
+    }>
+  ): PostContentBlock[] {
+    if (Array.isArray(blocks) && blocks.length > 0) {
+      return blocks
+        .map((block) => this.sanitizeBlock(block))
+        .filter((block): block is PostContentBlock => block !== null);
+    }
+
+    return this.fallbackBlocks(
+      content,
+      media.map((item, index) => ({
+        id: item.clientBlockId ?? `legacy-media-${index}`,
         type: item.type,
         url: item.url,
-        publicId: item.publicId
+        thumbnailUrl: item.thumbnailUrl,
+        publicId: item.publicId,
+        thumbnailPublicId: item.thumbnailPublicId,
+        caption: item.caption
       }))
-    };
+    );
+  }
+
+  private resolvePostBlocks(
+    rawBlocks: unknown,
+    content: string,
+    media: Array<{
+      id: string;
+      type: string;
+      url: string;
+      thumbnailUrl?: string | null;
+      publicId: string;
+      thumbnailPublicId?: string | null;
+      caption?: string | null;
+      clientBlockId?: string | null;
+    }>
+  ): PostContentBlock[] {
+    if (Array.isArray(rawBlocks)) {
+      const blocks = rawBlocks
+        .map((block) => this.sanitizeBlock(block))
+        .filter((block): block is PostContentBlock => block !== null);
+
+      if (blocks.length > 0) {
+        return blocks;
+      }
+    }
+
+    return this.fallbackBlocks(
+      content,
+      media.map((item) => ({
+        id: item.clientBlockId ?? item.id,
+        type: item.type,
+        url: item.url,
+        thumbnailUrl: item.thumbnailUrl ?? undefined,
+        publicId: item.publicId,
+        thumbnailPublicId: item.thumbnailPublicId ?? undefined,
+        caption: item.caption ?? undefined
+      }))
+    );
+  }
+
+  private sanitizeBlock(block: unknown): PostContentBlock | null {
+    if (!block || typeof block !== "object") return null;
+    const candidate = block as Partial<PostContentBlock> & Record<string, unknown>;
+    const id = typeof candidate.id === "string" && candidate.id.trim() ? candidate.id.trim() : `block-${Date.now()}`;
+
+    if (candidate.type === "paragraph") {
+      const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+      return text ? { id, type: "paragraph", text } : null;
+    }
+
+    if (candidate.type === "image") {
+      if (typeof candidate.url !== "string" || typeof candidate.publicId !== "string") return null;
+      return {
+        id,
+        type: "image",
+        url: candidate.url,
+        thumbnailUrl: typeof candidate.thumbnailUrl === "string" ? candidate.thumbnailUrl : null,
+        publicId: candidate.publicId,
+        thumbnailPublicId: typeof candidate.thumbnailPublicId === "string" ? candidate.thumbnailPublicId : null,
+        caption: typeof candidate.caption === "string" ? candidate.caption.trim() : null
+      };
+    }
+
+    if (candidate.type === "video") {
+      if (typeof candidate.url !== "string" || typeof candidate.publicId !== "string") return null;
+      return {
+        id,
+        type: "video",
+        url: candidate.url,
+        publicId: candidate.publicId,
+        caption: typeof candidate.caption === "string" ? candidate.caption.trim() : null
+      };
+    }
+
+    return null;
+  }
+
+  private fallbackBlocks(
+    content: string,
+    media: Array<{
+      id: string;
+      type: string;
+      url: string;
+      thumbnailUrl?: string | null;
+      publicId: string;
+      thumbnailPublicId?: string | null;
+      caption?: string | null;
+    }>
+  ): PostContentBlock[] {
+    const blocks: PostContentBlock[] = [];
+    const text = content.trim();
+    if (text) {
+      blocks.push({ id: "legacy-content", type: "paragraph", text });
+    }
+
+    media.forEach((item) => {
+      if (item.type === MediaTypeEnum.VIDEO) {
+        blocks.push({
+          id: item.id,
+          type: "video",
+          url: item.url,
+          publicId: item.publicId,
+          caption: item.caption ?? null
+        });
+      } else {
+        blocks.push({
+          id: item.id,
+          type: "image",
+          url: item.url,
+          thumbnailUrl: item.thumbnailUrl ?? null,
+          publicId: item.publicId,
+          thumbnailPublicId: item.thumbnailPublicId ?? null,
+          caption: item.caption ?? null
+        });
+      }
+    });
+
+    return blocks;
   }
 
   private buildExcerpt(content: string, limit: number) {

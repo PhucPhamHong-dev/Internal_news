@@ -17,8 +17,29 @@ export type FeedPost = {
   commentCount: number;
   viewCount: number;
   likedByMe: boolean;
-  media: Array<{ id: string; type: "IMAGE" | "VIDEO"; url: string }>;
+  myReaction?: "LIKE" | "LOVE" | "CARE" | "HAHA" | "WOW" | "SAD" | "ANGRY" | null;
+  blocks?: PostContentBlock[];
+  media: Array<{ id: string; type: "IMAGE" | "VIDEO"; url: string; thumbnailUrl?: string | null; caption?: string | null }>;
 };
+
+export type PostContentBlock =
+  | { id: string; type: "paragraph"; text: string }
+  | {
+      id: string;
+      type: "image";
+      url: string;
+      thumbnailUrl?: string | null;
+      publicId?: string;
+      thumbnailPublicId?: string | null;
+      caption?: string | null;
+    }
+  | {
+      id: string;
+      type: "video";
+      url: string;
+      publicId?: string;
+      caption?: string | null;
+    };
 
 export type FeedConnection = {
   items: FeedPost[];

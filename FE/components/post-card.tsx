@@ -11,6 +11,16 @@ import { Profile } from "./auth-store";
 import { capturePostQueryState, restorePostQueryState, updatePostCounters } from "./post-query-cache";
 import { Avatar, FeedPost, RelativeTime } from "./post-shared";
 
+const REACTIONS = [
+  { type: "LIKE", icon: "👍", label: "Thích" },
+  { type: "LOVE", icon: "❤️", label: "Yêu thích" },
+  { type: "CARE", icon: "🥰", label: "Quan tâm" },
+  { type: "HAHA", icon: "😄", label: "Haha" },
+  { type: "WOW", icon: "😮", label: "Wow" },
+  { type: "SAD", icon: "😢", label: "Buồn" },
+  { type: "ANGRY", icon: "😡", label: "Giận" }
+] as const;
+
 type PostCardProps = {
   post: FeedPost;
   token: string;
@@ -27,7 +37,9 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
   const [editContent, setEditContent] = useState(post.content);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const reactionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canPin = useMemo(() => {
     if (profile.role === "ADMIN") return true;
@@ -63,6 +75,14 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
     return undefined;
   }, [menuOpen]);
 
+  useEffect(() => {
+    return () => {
+      if (reactionsTimerRef.current) {
+        clearTimeout(reactionsTimerRef.current);
+      }
+    };
+  }, []);
+
   const prefetchPostDetail = () => {
     void router.prefetch(`/posts/${post.id}`);
     void queryClient.prefetchQuery({
@@ -71,25 +91,38 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
     });
   };
 
-  const toggleLike = async () => {
-    const nextLiked = !post.likedByMe;
+  const setReaction = async (reactionType: (typeof REACTIONS)[number]["type"] | null) => {
+    const nextLiked = Boolean(reactionType);
     const snapshot = capturePostQueryState(queryClient, post.id);
 
     updatePostCounters(queryClient, post.id, {
       likedByMe: nextLiked,
-      likeCount: post.likeCount + (nextLiked ? 1 : -1)
+      likeCount: post.likeCount + (post.likedByMe === nextLiked ? 0 : nextLiked ? 1 : -1),
+      myReaction: reactionType
     });
 
     try {
-      if (nextLiked) {
-        await apiRequest(`/posts/${post.id}/like`, token, "POST");
+      if (reactionType) {
+        await apiRequest(`/posts/${post.id}/reaction`, token, "POST", { type: reactionType });
       } else {
-        await apiRequest(`/posts/${post.id}/like`, token, "DELETE");
+        await apiRequest(`/posts/${post.id}/reaction`, token, "DELETE");
       }
     } catch (error) {
       restorePostQueryState(queryClient, snapshot);
-      window.alert(error instanceof Error ? error.message : "Không thể cập nhật lượt thích");
+      window.alert(error instanceof Error ? error.message : "Không thể cập nhật cảm xúc");
     }
+  };
+
+  const activeReaction = REACTIONS.find((item) => item.type === post.myReaction);
+
+  const openReactions = () => {
+    if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
+    setReactionsOpen(true);
+  };
+
+  const closeReactions = () => {
+    if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
+    reactionsTimerRef.current = setTimeout(() => setReactionsOpen(false), 220);
   };
 
   const submitEditPost = async () => {
@@ -129,9 +162,8 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
     <>
       <article className="card mb-4 overflow-hidden transition hover:shadow-[0_22px_55px_-36px_rgba(37,99,235,0.32)]">
         <div className="flex gap-4 px-5 py-5 sm:px-6">
-          <div className="flex w-12 shrink-0 flex-col items-center">
+          <div className="flex w-12 shrink-0 items-start justify-center pt-0.5">
             <Avatar name={post.authorName} avatarUrl={post.authorAvatar} />
-            <div className="mt-3 w-px flex-1 bg-slate-200" />
           </div>
 
           <div className="min-w-0 flex-1">
@@ -224,10 +256,34 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
             </Link>
 
             <div className="mt-5 flex items-center gap-6 text-[14px] text-slate-500">
-              <button className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "text-red-500" : ""}`} onClick={() => void toggleLike()}>
-                <Heart size={20} fill={post.likedByMe ? "#EF4444" : "none"} color={post.likedByMe ? "#EF4444" : "currentColor"} />
-                <span>{post.likeCount}</span>
-              </button>
+              <div className="relative" onMouseEnter={openReactions} onMouseLeave={closeReactions}>
+                <button
+                  className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "text-blue-600" : ""}`}
+                  onClick={() => void setReaction(post.likedByMe ? null : "LIKE")}
+                >
+                  {activeReaction ? <span className="text-lg leading-none">{activeReaction.icon}</span> : <Heart size={20} />}
+                  <span>{post.likeCount}</span>
+                </button>
+                <div
+                  className={`absolute bottom-7 left-0 z-20 flex gap-1 rounded-full border border-slate-200 bg-white px-2 py-1.5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.38)] transition ${
+                    reactionsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"
+                  }`}
+                >
+                  {REACTIONS.map((reaction) => (
+                    <button
+                      key={reaction.type}
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-xl transition hover:-translate-y-1 hover:bg-slate-50"
+                      title={reaction.label}
+                      onClick={() => {
+                        setReactionsOpen(false);
+                        void setReaction(reaction.type);
+                      }}
+                    >
+                      {reaction.icon}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <button className="inline-flex items-center gap-2 transition hover:text-slate-700" onClick={() => router.push(`/posts/${post.id}`)}>
                 <MessageCircle size={20} />

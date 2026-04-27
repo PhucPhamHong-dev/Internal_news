@@ -6,6 +6,7 @@ import { useAuthStore } from "./auth-store";
 import { BottomNav } from "./bottom-nav";
 import { Header } from "./header";
 import { LeftRail } from "./left-rail";
+import { ThemePicker } from "./theme-picker";
 
 type AppShellProps = {
   children: ReactNode;
@@ -39,7 +40,7 @@ export function AppShell({ children }: AppShellProps) {
       <Header unreadCount={0} onOpenNotifications={() => undefined} onLogout={clearAuth} showAdminEntry={currentProfile.role === "ADMIN"} onOpenAdmin={openAdmin} />
 
       <main className="mx-auto flex w-full justify-center px-3 py-4 sm:px-4 lg:px-6 lg:py-6">
-        <LeftRail onGoHome={goHome} onOpenSearch={openSearch} showAdminEntry={currentProfile.role === "ADMIN"} onOpenAdmin={openAdmin} />
+        <LeftRail onGoHome={goHome} onOpenSearch={openSearch} showAdminEntry={currentProfile.role === "ADMIN"} onOpenAdmin={openAdmin} bottomSlot={<ThemePicker />} />
         <section className="w-full max-w-7xl lg:ml-[116px]">{children}</section>
       </main>
 
