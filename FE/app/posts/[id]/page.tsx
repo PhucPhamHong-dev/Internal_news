@@ -11,6 +11,8 @@ import { FeedPost } from "@/components/post-shared";
 import { RelatedPostsSection } from "@/components/related-posts-section";
 import { useAuthRedirect } from "@/components/use-auth-redirect";
 
+const LAST_FEED_ROUTE_KEY = "internal_threads_last_feed_route";
+
 function DetailSkeleton() {
   return (
     <div className="space-y-4">
@@ -43,6 +45,7 @@ export default function PostDetailPage() {
   const router = useRouter();
   const { token, profile, initialized, setProfile, clearAuth, isAuthenticated } = useAuthRedirect();
   const postId = useMemo(() => params.id, [params.id]);
+  const fallbackFeedUrl = useMemo(() => "/", []);
 
   const fetchMe = async (authToken: string) => {
     const me = await apiRequest<Profile>("/me", authToken);
@@ -59,6 +62,12 @@ export default function PostDetailPage() {
       }
     });
   }, [initialized, token, clearAuth, setProfile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedFeedUrl = window.sessionStorage.getItem(LAST_FEED_ROUTE_KEY) || fallbackFeedUrl;
+    void router.prefetch(savedFeedUrl);
+  }, [fallbackFeedUrl, router]);
 
   const postQuery = useQuery({
     queryKey: ["post-detail", postId, profile?.id],
@@ -77,6 +86,24 @@ export default function PostDetailPage() {
     void apiRequest(`/posts/${postId}/view`, token, "POST").catch(() => undefined);
   }, [postId, profile?.linked, token]);
 
+  const handleBackToFeed = () => {
+    if (typeof window === "undefined") {
+      router.push(fallbackFeedUrl);
+      return;
+    }
+
+    const savedFeedUrl = window.sessionStorage.getItem(LAST_FEED_ROUTE_KEY) || fallbackFeedUrl;
+    const referrer = document.referrer;
+    const hasInternalReferrer = referrer ? new URL(referrer).origin === window.location.origin : false;
+
+    if (window.history.length > 1 && hasInternalReferrer) {
+      router.back();
+      return;
+    }
+
+    router.push(savedFeedUrl);
+  };
+
   if (!initialized || !isAuthenticated || !token || !profile) {
     return <DetailSkeleton />;
   }
@@ -85,7 +112,7 @@ export default function PostDetailPage() {
     <section className="mx-auto w-full max-w-[780px]">
       <button
         className="mb-4 inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
-        onClick={() => router.push("/")}
+        onClick={handleBackToFeed}
       >
         <ArrowLeft size={16} />
         Quay lại feed
@@ -102,7 +129,7 @@ export default function PostDetailPage() {
             onRefreshPost={async () => {
               await postQuery.refetch();
             }}
-            onDeleted={() => router.push("/")}
+            onDeleted={handleBackToFeed}
           />
           <RelatedPostsSection posts={relatedQuery.data ?? []} />
         </>

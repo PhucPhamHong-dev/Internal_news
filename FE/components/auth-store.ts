@@ -24,6 +24,8 @@ type AuthState = {
 
 const TOKEN_KEY = "internal_threads_token";
 const PROFILE_KEY = "internal_threads_profile";
+const TOKEN_COOKIE_KEY = "internal_threads_session";
+const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
 let state: AuthState = {
   token: null,
@@ -100,8 +102,10 @@ function persistToken(token: string | null) {
   if (typeof window === "undefined") return;
   if (token) {
     window.localStorage.setItem(TOKEN_KEY, token);
+    window.document.cookie = `${TOKEN_COOKIE_KEY}=${encodeURIComponent(token)}; path=/; max-age=${TOKEN_COOKIE_MAX_AGE}; samesite=lax`;
   } else {
     window.localStorage.removeItem(TOKEN_KEY);
+    window.document.cookie = `${TOKEN_COOKIE_KEY}=; path=/; max-age=0; samesite=lax`;
   }
 }
 

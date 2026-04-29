@@ -736,14 +736,14 @@ export function PostEditorModal(props: PostEditorModalProps) {
                       <Pilcrow size={18} />
                       + Đoạn văn
                     </button>
-                    <button
+                    {/* <button
                       type="button"
                       className="theme-primary-border-hover inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-600 transition hover:bg-[color:var(--primary-faint)] hover:text-[color:var(--primary)]"
                       onClick={() => window.alert("Tính năng đính kèm tài liệu đang được bảo trì.")}
                     >
                       <FileText size={18} />
                       + Tài liệu
-                    </button>
+                    </button> */}
                     <input
                       ref={fileInputRef}
                       name="media"

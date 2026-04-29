@@ -5,13 +5,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Heart, MessageCircle, MoreHorizontal, PenSquare, Pin, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { apiRequest } from "./api";
 import { Profile } from "./auth-store";
 import { EditablePost, PostEditorModal } from "./post-editor-modal";
 import { capturePostQueryState, restorePostQueryState, updatePostCounters } from "./post-query-cache";
 import { Avatar, FeedPost, REACTION_OPTIONS, RelativeTime } from "./post-shared";
 import { ReactionSummaryModal } from "./reaction-summary-modal";
+
+const LAST_FEED_ROUTE_KEY = "internal_threads_last_feed_route";
 
 type PostCardProps = {
   post: FeedPost;
@@ -21,7 +23,9 @@ type PostCardProps = {
 };
 
 export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
+  const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -44,6 +48,10 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
   }, [post.authorId, profile.canPost, profile.id, profile.role]);
 
   const previewMedia = post.media[0] ?? null;
+  const currentFeedUrl = useMemo(() => {
+    const query = searchParams.toString();
+    return query ? `${pathname}?${query}` : pathname;
+  }, [pathname, searchParams]);
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
@@ -75,6 +83,11 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
       queryKey: ["post-detail", post.id, profile.id],
       queryFn: ({ signal }) => apiRequest(`/posts/${post.id}`, token, "GET", undefined, { signal })
     });
+  };
+
+  const rememberFeedRoute = () => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(LAST_FEED_ROUTE_KEY, currentFeedUrl);
   };
 
   const setReaction = async (reactionType: (typeof REACTION_OPTIONS)[number]["type"] | null) => {
@@ -150,7 +163,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
 
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
-              <Link href={`/posts/${post.id}`} className="min-w-0 flex-1" onMouseEnter={prefetchPostDetail}>
+              <Link href={`/posts/${post.id}`} className="min-w-0 flex-1" onMouseEnter={prefetchPostDetail} onClick={rememberFeedRoute}>
                 <div className="flex flex-wrap items-center gap-2 text-[14px] text-slate-500">
                   <span className="font-bold text-slate-900">{post.authorName}</span>
                   <span>·</span>
@@ -218,7 +231,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
               </div>
             </div>
 
-            <Link href={`/posts/${post.id}`} className="mt-3 block" onMouseEnter={prefetchPostDetail}>
+            <Link href={`/posts/${post.id}`} className="mt-3 block" onMouseEnter={prefetchPostDetail} onClick={rememberFeedRoute}>
               <div className="whitespace-pre-wrap text-[15px] leading-7 text-slate-700">{post.content}</div>
 
               {previewMedia && (
