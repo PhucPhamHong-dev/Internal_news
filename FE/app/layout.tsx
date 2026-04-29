@@ -2,42 +2,25 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { QueryProvider } from "@/components/query-provider";
-import { ThemeBootstrap } from "@/components/theme-bootstrap";
+
+const COMPANY_ICON_URL =
+  "https://static.wixstatic.com/media/20df35_3985cf6e76d347f08b9bdc1e4bf2d815~mv2.png/v1/crop/x_0,y_16,w_150,h_119/fill/w_184,h_144,al_c,lg_1,q_85,enc_avif,quality_auto/91505850_104574237870559_618557836888952.png";
 
 export const metadata: Metadata = {
   title: "Bản Tin Nội Bộ",
-  description: "Nền tảng bản tin nội bộ theo phong cách hiện đại dành cho doanh nghiệp",
+  description: "Nền tảng bản tin nội bộ",
   icons: {
-    icon: [
-      { url: "/icons/favicon-16x16.png", sizes: "16x16", type: "image/png" },
-      { url: "/icons/favicon-32x32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }
-    ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
-    shortcut: ["/icons/favicon-32x32.png"]
-  },
-  manifest: "/manifest.webmanifest"
+    icon: COMPANY_ICON_URL,
+    shortcut: COMPANY_ICON_URL,
+    apple: COMPANY_ICON_URL
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi">
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(() => {
-              const key = 'app-theme';
-              const fallback = 'blue';
-              const cookieMatch = document.cookie.split('; ').find((item) => item.startsWith(key + '='));
-              const themeKey = localStorage.getItem(key) || (cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1] || '') : '') || fallback;
-              document.cookie = key + '=' + themeKey + '; path=/; max-age=31536000; samesite=lax';
-            })();`
-          }}
-        />
-      </head>
       <body>
         <QueryProvider>
-          <ThemeBootstrap />
           <AppShell>{children}</AppShell>
         </QueryProvider>
       </body>

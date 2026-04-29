@@ -1,0 +1,24 @@
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY BE/package.json BE/package.json
+COPY FE/package.json FE/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN npm ci
+
+COPY . .
+
+RUN npm run build -w @internal/shared \
+  && npm run prisma:generate -w @internal/api \
+  && npm run build -w @internal/api
+
+EXPOSE 4000
+
+CMD ["node", "BE/dist/src/main.js"]

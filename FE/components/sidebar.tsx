@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Bell, LogOut, Search } from "lucide-react";
 
@@ -19,13 +19,13 @@ export function Sidebar({ onOpenNotifications, onLogout, onSearchChange, search,
           <Search size={16} className="text-slate-500" />
           <input
             className="w-full bg-transparent text-sm outline-none"
-            placeholder="TÃ¬m bÃ i theo tiÃªu Ä‘á»/ná»™i dung"
+            placeholder="Tìm bài theo tiêu đề/nội dung"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </div>
         <div className="mb-5 space-y-2">
-          <p className="text-xs font-semibold uppercase text-slate-500">BÃ i má»›i nháº¥t</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">Bài mới nhất</p>
           {suggestions.map((item) => (
             <button
               key={item.id}
@@ -39,7 +39,7 @@ export function Sidebar({ onOpenNotifications, onLogout, onSearchChange, search,
         <div className="space-y-2">
           <button className="icon-btn w-full justify-start" onClick={onOpenNotifications}>
             <Bell size={16} />
-            ThÃ´ng bÃ¡o
+            Thông báo
           </button>
           <button className="icon-btn w-full justify-start" onClick={onLogout}>
             <LogOut size={16} />
@@ -50,4 +50,3 @@ export function Sidebar({ onOpenNotifications, onLogout, onSearchChange, search,
     </aside>
   );
 }
-

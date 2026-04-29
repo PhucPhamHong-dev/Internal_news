@@ -1,19 +1,20 @@
-﻿"use client";
+"use client";
 
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, Plus } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { CredentialResponse, GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Plus } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { ApiError, apiRequest } from "@/components/api";
+import { apiRequest } from "@/components/api";
 import { Profile, useAuthStore } from "@/components/auth-store";
+import { CompanyLogo } from "@/components/company-logo";
 import { Composer } from "@/components/composer";
-import { NewsletterArchiveYear, NewsletterPeriodPicker } from "@/components/newsletter-period-picker";
+import { MsnvModal } from "@/components/msnv-modal";
 import { NotificationPanel } from "@/components/notification-panel";
 import { PostCard } from "@/components/post-card";
 import { FeedConnection, FeedPost } from "@/components/post-shared";
 import { SearchPanel, SearchPreview } from "@/components/search-panel";
-import { useAuthRedirect } from "@/components/use-auth-redirect";
 import { useDebouncedValue } from "@/components/use-debounced-value";
 
 type NotificationItem = {
@@ -23,20 +24,9 @@ type NotificationItem = {
   isRead: boolean;
 };
 
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:4000";
 const FEED_SCROLL_KEY = "internal_threads_feed_scroll";
-
-function parseYearParam(value: string | null) {
-  if (!value) return null;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function parseMonthParam(value: string | null) {
-  if (!value) return null;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 12 ? parsed : null;
-}
 
 function FeedSkeleton({ count = 3 }: { count?: number }) {
   return (
@@ -62,45 +52,30 @@ function FeedSkeleton({ count = 3 }: { count?: number }) {
 }
 
 function HomePageContent() {
-  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const { token, profile, initialized, setProfile, clearAuth, saveAuth, isAuthenticated } = useAuthRedirect();
-  const today = useMemo(() => new Date(), []);
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth() + 1;
+  const { token, profile, initialized, setProfile, saveAuth, clearAuth } = useAuthStore();
+  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [composerOpenSignal, setComposerOpenSignal] = useState(0);
-  const [newPassword, setNewPassword] = useState("");
-  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [impersonateTarget, setImpersonateTarget] = useState<{ employeeId: string; fullName: string; msnv: string } | null>(null);
   const [prefetchNode, setPrefetchNode] = useState<HTMLDivElement | null>(null);
-  const [selectedYear, setSelectedYear] = useState(currentYear);
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
-  const [selectionReady, setSelectionReady] = useState(false);
   const handledPanelRef = useRef<string | null>(null);
   const scrollRestoredRef = useRef(false);
   const debouncedSearch = useDebouncedValue(search, 350);
 
-  const canPost = useMemo(() => Boolean(profile && (profile.role === "ADMIN" || profile.canPost)), [profile]);
+  const canPost = useMemo(() => profile?.role === "ADMIN" || profile?.role === "WRITER", [profile?.role]);
 
-  const replaceCurrentParams = useCallback(
-    (mutate: (params: URLSearchParams) => void) => {
-      const params = new URLSearchParams(searchParams.toString());
-      mutate(params);
-      const next = params.toString();
-      router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
-    },
-    [pathname, router, searchParams]
-  );
-
-  const clearPanelParam = useCallback(() => {
-    replaceCurrentParams((params) => params.delete("panel"));
-  }, [replaceCurrentParams]);
+  const clearPanelParam = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("panel");
+    const next = params.toString();
+    router.replace(next ? `/?${next}` : "/");
+  };
 
   const fetchMe = async (authToken: string) => {
     const me = await apiRequest<Profile>("/me", authToken);
@@ -114,34 +89,19 @@ function HomePageContent() {
 
   useEffect(() => {
     if (!initialized || !token) return;
-    void fetchMe(token).catch((error) => {
-      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-        clearAuth();
-      } else {
-        console.error("Khong the dong bo phien dang nhap tu /me", error);
-      }
-    });
+    void fetchMe(token).catch(() => clearAuth());
   }, [initialized, token, clearAuth, setProfile]);
 
   const feedQuery = useInfiniteQuery({
-    queryKey: ["feed", profile?.id, selectedYear, selectedMonth],
-    enabled: Boolean(token && profile?.linked && debouncedSearch.trim() === "" && selectionReady),
+    queryKey: ["feed", profile?.id],
+    enabled: Boolean(token && profile?.linked && debouncedSearch.trim() === ""),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
       const query = new URLSearchParams({ limit: "5" });
       if (pageParam) query.set("cursor", pageParam);
-      query.set("year", String(selectedYear));
-      query.set("month", String(selectedMonth));
       return apiRequest<FeedConnection>(`/posts?${query.toString()}`, token!, "GET", undefined, { signal });
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined
-  });
-
-  const archiveQuery = useQuery({
-    queryKey: ["post-archive", profile?.id],
-    enabled: Boolean(token && profile?.linked),
-    queryFn: ({ signal }) => apiRequest<NewsletterArchiveYear[]>("/posts/archive", token!, "GET", undefined, { signal }),
-    staleTime: 5 * 60 * 1000
   });
 
   const searchQuery = useQuery({
@@ -167,7 +127,6 @@ function HomePageContent() {
   const feedPosts = useMemo(() => feedQuery.data?.pages.flatMap((page) => page.items) ?? [], [feedQuery.data]);
   const searchResults = useMemo(() => searchQuery.data?.results ?? [], [searchQuery.data?.results]);
   const visiblePosts = debouncedSearch.trim() ? searchResults : feedPosts;
-  const archiveYears = archiveQuery.data ?? [];
   const visibleSuggestions = useMemo<SearchPreview[]>(() => {
     if (debouncedSearch.trim()) {
       return searchQuery.data?.results.map((item) => ({
@@ -182,30 +141,6 @@ function HomePageContent() {
 
     return suggestionQuery.data?.suggestions ?? [];
   }, [debouncedSearch, searchQuery.data?.results, suggestionQuery.data?.suggestions]);
-
-  useEffect(() => {
-    const nextYear = parseYearParam(searchParams.get("year")) ?? currentYear;
-    const nextMonth = parseMonthParam(searchParams.get("month")) ?? currentMonth;
-    setSelectedYear((value) => (value === nextYear ? value : nextYear));
-    setSelectedMonth((value) => (value === nextMonth ? value : nextMonth));
-    setSelectionReady(true);
-  }, [currentMonth, currentYear, searchParams]);
-
-  useEffect(() => {
-    if (!selectionReady) return;
-
-    const currentParamYear = parseYearParam(searchParams.get("year"));
-    const currentParamMonth = parseMonthParam(searchParams.get("month"));
-
-    if (currentParamYear === selectedYear && currentParamMonth === selectedMonth) {
-      return;
-    }
-
-    replaceCurrentParams((params) => {
-      params.set("year", String(selectedYear));
-      params.set("month", String(selectedMonth));
-    });
-  }, [replaceCurrentParams, searchParams, selectedMonth, selectedYear, selectionReady]);
 
   useEffect(() => {
     if (!token || !profile?.linked) return;
@@ -303,16 +238,27 @@ function HomePageContent() {
     return () => observer.disconnect();
   }, [debouncedSearch, feedQuery, prefetchNode]);
 
-  const handleForceChangePassword = async () => {
-    if (!token || !profile) return;
-    setChangePasswordError(null);
+  const handleGoogleLogin = async (credentialResponse: CredentialResponse) => {
+    if (!credentialResponse.credential) return;
+    setLoading(true);
     try {
-      await apiRequest("/auth/change-password", token, "POST", { newPassword });
-      saveAuth(token, { ...profile, mustChangePassword: false });
-      setNewPassword("");
-    } catch (error) {
-      setChangePasswordError(error instanceof Error ? error.message : "Không thể đổi mật khẩu");
+      const response = await apiRequest<{ token: string; profile: Profile }>("/auth/google/callback", null, "POST", {
+        idToken: credentialResponse.credential
+      });
+      saveAuth(response.token, response.profile);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleMsnvSubmit = async (msnv: string) => {
+    if (!token) return;
+    const response = await apiRequest<{ token: string; profile: Profile }>("/auth/link-msnv", token, "POST", { msnv });
+    saveAuth(response.token, response.profile);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["feed"] }),
+      queryClient.invalidateQueries({ queryKey: ["search-suggestions"] })
+    ]);
   };
 
   const refreshFeedQueries = async () => {
@@ -327,27 +273,36 @@ function HomePageContent() {
     return <FeedSkeleton />;
   }
 
-  if (!isAuthenticated || !token || !profile) return <FeedSkeleton />;
+  if (!token || !profile) {
+    return (
+      <main className="grid min-h-screen place-items-center px-4">
+        <section className="card w-full max-w-md p-7 text-center sm:p-8">
+          <div className="flex justify-center">
+            <CompanyLogo imageClassName="h-20 w-auto" />
+          </div>
+          <h1 className="mt-5 text-3xl font-extrabold tracking-tight text-slate-900">Bản tin nội bộ</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-500">Chào mừng bạn quay lại. Đăng nhập bằng Google để truy cập hệ thống truyền thông nội bộ của chương trình tài chính vi mô Anh Chị Em.</p>
+          <div className="mt-6 flex justify-center">
+            <GoogleLogin onSuccess={handleGoogleLogin} onError={() => undefined} />
+          </div>
+          {loading && <p className="mt-4 text-sm text-slate-500">Đang xác thực...</p>}
+        </section>
+      </main>
+    );
+  }
 
   const showInitialSkeleton =
     profile.linked &&
-    ((debouncedSearch.trim() === "" && (feedQuery.isLoading || !selectionReady) && feedPosts.length === 0) ||
+    ((debouncedSearch.trim() === "" && feedQuery.isLoading && feedPosts.length === 0) ||
       (debouncedSearch.trim() !== "" && searchQuery.isLoading && searchResults.length === 0));
 
   return (
     <>
-      <section className="mx-auto w-full max-w-[820px]">
-        <section className="mb-6 px-1 py-1 text-center sm:px-0">
-          <NewsletterPeriodPicker
-            archiveYears={archiveYears}
-            selectedYear={selectedYear}
-            selectedMonth={selectedMonth}
-            onSelect={(year, month) => {
-              setSelectedYear(year);
-              setSelectedMonth(month);
-            }}
-          />
-        </section>
+      <section className="mx-auto w-full max-w-[780px]">
+        <div className="mb-5 hidden items-center justify-center gap-2 text-4xl font-extrabold tracking-tight text-slate-900 lg:flex">
+          Dành cho bạn
+          <ChevronDown size={26} className="text-slate-400" />
+        </div>
 
         <Composer
           token={token}
@@ -358,28 +313,24 @@ function HomePageContent() {
           impersonateTarget={impersonateTarget}
           onCloseCompose={() => {
             handledPanelRef.current = null;
-            if (searchParams.get("panel") || searchParams.get("composeAs")) {
-              replaceCurrentParams((params) => {
-                params.delete("panel");
-                params.delete("composeAs");
-              });
+            if (searchParams.get("panel")) {
+              clearPanelParam();
             }
             if (impersonateTarget) {
               setImpersonateTarget(null);
               window.sessionStorage.removeItem("admin_compose_target");
+              router.replace("/");
             }
           }}
           onCreated={() => {
             handledPanelRef.current = null;
-            if (searchParams.get("panel") || searchParams.get("composeAs")) {
-              replaceCurrentParams((params) => {
-                params.delete("panel");
-                params.delete("composeAs");
-              });
+            if (searchParams.get("panel")) {
+              clearPanelParam();
             }
             if (impersonateTarget) {
               setImpersonateTarget(null);
               window.sessionStorage.removeItem("admin_compose_target");
+              router.replace("/");
             }
             void refreshFeedQueries();
           }}
@@ -389,13 +340,9 @@ function HomePageContent() {
           <FeedSkeleton />
         ) : visiblePosts.length === 0 ? (
           <div className="card px-6 py-10 text-center">
-            <h3 className="text-lg font-bold text-slate-900">
-              {debouncedSearch.trim() ? "Chưa có bài viết phù hợp" : "Chưa có bản tin trong tháng này."}
-            </h3>
+            <h3 className="text-lg font-bold text-slate-900">Chưa có bài viết phù hợp</h3>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              {debouncedSearch.trim()
-                ? "Không tìm thấy bài viết khớp với từ khóa hiện tại."
-                : "Hãy chọn tháng khác trong bộ lọc nếu bạn muốn xem lại các số bản tin trước đó."}
+              {debouncedSearch.trim() ? "Không tìm thấy bài viết khớp với từ khóa hiện tại." : "Feed sẽ hiển thị khi có bài viết nội bộ mới."}
             </p>
           </div>
         ) : (
@@ -416,10 +363,9 @@ function HomePageContent() {
 
       {canPost && (
         <button
-          className="theme-primary-bg theme-primary-bg-hover fixed bottom-8 right-8 z-20 hidden h-20 w-20 items-center justify-center rounded-[28px] transition lg:inline-flex"
+          className="fixed bottom-8 right-8 z-20 hidden h-20 w-20 items-center justify-center rounded-[28px] bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-[0_22px_38px_-18px_rgba(37,99,235,0.52)] transition hover:from-blue-600 hover:to-blue-700 lg:inline-flex"
           onClick={() => setComposerOpenSignal((value) => value + 1)}
           aria-label="Mở tạo bài viết"
-          style={{ boxShadow: "0 22px 38px -18px color-mix(in srgb, var(--app-accent) 44%, transparent)" }}
         >
           <Plus size={36} />
         </button>
@@ -453,43 +399,17 @@ function HomePageContent() {
         }}
       />
 
-      {profile.mustChangePassword && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/18 px-4 backdrop-blur-sm">
-          <section className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.28)]">
-            <div className="theme-primary-soft flex h-12 w-12 items-center justify-center rounded-2xl">
-              <KeyRound size={22} />
-            </div>
-            <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">Đổi mật khẩu lần đầu</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Vì bạn đăng nhập bằng mật khẩu được cấp, hãy đặt mật khẩu mới trước khi tiếp tục sử dụng hệ thống.
-            </p>
-            <input
-              className="theme-primary-focus mt-5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:bg-white"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              placeholder="Mật khẩu mới, tối thiểu 6 ký tự"
-            />
-            {changePasswordError && <p className="mt-3 text-sm text-red-600">{changePasswordError}</p>}
-            <button
-              className="btn-primary mt-5 w-full px-4 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={newPassword.length < 6}
-              onClick={() => void handleForceChangePassword()}
-            >
-              Lưu mật khẩu mới
-            </button>
-          </section>
-        </div>
-      )}
+      {!profile.linked && <MsnvModal onSubmit={handleMsnvSubmit} loading={loading} />}
     </>
   );
 }
 
 export default function HomePage() {
   return (
-    <Suspense fallback={<main className="min-h-screen" />}>
-      <HomePageContent />
-    </Suspense>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <Suspense fallback={<main className="min-h-screen" />}>
+        <HomePageContent />
+      </Suspense>
+    </GoogleOAuthProvider>
   );
 }
-

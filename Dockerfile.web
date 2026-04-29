@@ -1,0 +1,19 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY BE/package.json BE/package.json
+COPY FE/package.json FE/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN npm ci
+
+COPY . .
+
+RUN npm run build -w @internal/shared \
+  && npm run build -w @internal/web
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start", "-w", "@internal/web"]
