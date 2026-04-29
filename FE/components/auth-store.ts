@@ -7,7 +7,9 @@ export type Profile = {
   email: string | null;
   fullName: string;
   avatarUrl: string | null;
-  role: "ADMIN" | "WRITER" | "VIEWER";
+  role: "ADMIN" | "HR_MANAGER" | "WRITER" | "VIEWER";
+  canPost: boolean;
+  canManageEmployees: boolean;
   linkedMsnv: string | null;
   linked: boolean;
   mustChangePassword?: boolean;
@@ -30,6 +32,16 @@ let state: AuthState = {
 };
 
 const listeners = new Set<() => void>();
+
+function normalizeProfile(profile: Profile | null): Profile | null {
+  if (!profile) return null;
+
+  return {
+    ...profile,
+    canPost: profile.canPost ?? (profile.role === "ADMIN" || profile.role === "WRITER"),
+    canManageEmployees: profile.canManageEmployees ?? (profile.role === "ADMIN" || profile.role === "HR_MANAGER")
+  };
+}
 
 function emit() {
   listeners.forEach((listener) => listener());
@@ -59,7 +71,7 @@ function hydrateAuthState() {
     const rawProfile = window.localStorage.getItem(PROFILE_KEY);
     state = {
       token: currentToken,
-      profile: rawProfile ? (JSON.parse(rawProfile) as Profile) : null,
+      profile: rawProfile ? normalizeProfile(JSON.parse(rawProfile) as Profile) : null,
       initialized: true
     };
   } catch {
@@ -101,16 +113,18 @@ export function useAuthStore() {
   }, []);
 
   const setProfile = (nextProfile: Profile | null) => {
-    persistProfile(nextProfile);
-    setState({ profile: nextProfile });
+    const normalized = normalizeProfile(nextProfile);
+    persistProfile(normalized);
+    setState({ profile: normalized });
   };
 
   const saveAuth = (nextToken: string, nextProfile: Profile) => {
+    const normalized = normalizeProfile(nextProfile);
     persistToken(nextToken);
-    persistProfile(nextProfile);
+    persistProfile(normalized);
     setState({
       token: nextToken,
-      profile: nextProfile,
+      profile: normalized,
       initialized: true
     });
   };

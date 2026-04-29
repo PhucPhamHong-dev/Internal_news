@@ -50,6 +50,11 @@ export class PostsController {
     return this.postsService.getPostById(user.sub, id);
   }
 
+  @Get("posts/:id/reactions/summary")
+  getReactionSummary(@Param("id") id: string) {
+    return this.postsService.getReactionSummary(id);
+  }
+
   @Get("posts/:id/related")
   getRelatedPosts(@CurrentUser() user: AuthUser, @Param("id") id: string, @Query("limit") limit?: string) {
     return this.postsService.getRelatedPosts(user.sub, id, limit ? Number(limit) : undefined);

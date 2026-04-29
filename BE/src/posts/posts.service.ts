@@ -28,6 +28,9 @@ type FeedOptions = {
 
 type PostContentBlock =
   | { id: string; type: "paragraph"; text: string }
+  | { id: string; type: "heading"; text: string }
+  | { id: string; type: "quote"; text: string }
+  | { id: string; type: "divider" }
   | {
       id: string;
       type: "image";
@@ -56,6 +59,7 @@ type FeedSummaryRecord = {
     fullName: string;
     avatarUrl: string | null;
     role: string;
+    canPost: boolean;
   };
   media: Array<{
     id: string;
@@ -104,6 +108,12 @@ type PostCounts = {
   viewCount: number;
 };
 
+type ReactionSummary = {
+  postId: string;
+  total: number;
+  counts: Partial<Record<ReactionTypeEnum, number>>;
+};
+
 type PostDetailCache = {
   id: string;
   authorId: string;
@@ -145,7 +155,7 @@ export class PostsService {
   }
 
   async createPost(user: AuthUser, dto: CreatePostDto) {
-    if (user.role === RoleEnum.VIEWER) {
+    if (!this.userCanPost(user)) {
       throw new ForbiddenException("Viewer khong duoc tao bai viet");
     }
 
@@ -180,7 +190,8 @@ export class PostsService {
           select: {
             fullName: true,
             avatarUrl: true,
-            role: true
+            role: true,
+            canPost: true
           }
         },
         media: {
@@ -255,7 +266,8 @@ export class PostsService {
             select: {
               fullName: true,
               avatarUrl: true,
-              role: true
+              role: true,
+              canPost: true
             }
           },
           media: {
@@ -304,6 +316,34 @@ export class PostsService {
     return batch.items;
   }
 
+  async getReactionSummary(postId: string): Promise<ReactionSummary> {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
+      select: { id: true }
+    });
+
+    if (!post) {
+      throw new NotFoundException("Post not found");
+    }
+
+    const grouped = await this.prisma.postLike.groupBy({
+      by: ["reactionType"],
+      where: { postId },
+      _count: { _all: true }
+    });
+
+    const counts = grouped.reduce<Partial<Record<ReactionTypeEnum, number>>>((result, item) => {
+      result[item.reactionType as ReactionTypeEnum] = item._count._all;
+      return result;
+    }, {});
+
+    return {
+      postId,
+      total: grouped.reduce((sum, item) => sum + item._count._all, 0),
+      counts
+    };
+  }
+
   async getArchive() {
     const groups = await this.prisma.post.groupBy({
       by: ["createdAt"],
@@ -339,19 +379,36 @@ export class PostsService {
 
     this.ensurePostManagePermission(user, post.authorId);
 
+    const media = dto.media ?? [];
     const updated = await this.prisma.post.update({
       where: { id: postId },
       data: {
         title: dto.title.trim(),
         content: dto.content.trim(),
-        contentBlocks: dto.blocks ? this.normalizeBlocks(dto.blocks, dto.content, []) : Prisma.JsonNull
+        contentBlocks: dto.blocks ? this.normalizeBlocks(dto.blocks, dto.content, media) : Prisma.JsonNull,
+        media: dto.media
+          ? {
+              deleteMany: {},
+              create: media.map((item, index) => ({
+                type: item.type,
+                url: item.url,
+                publicId: item.publicId,
+                thumbnailUrl: item.thumbnailUrl,
+                thumbnailPublicId: item.thumbnailPublicId,
+                caption: item.caption,
+                clientBlockId: item.clientBlockId,
+                sortOrder: item.sortOrder ?? index
+              }))
+            }
+          : undefined
       },
       include: {
         author: {
           select: {
             fullName: true,
             avatarUrl: true,
-            role: true
+            role: true,
+            canPost: true
           }
         },
         media: {
@@ -410,10 +467,10 @@ export class PostsService {
     if (!post) {
       throw new NotFoundException("Post not found");
     }
-    if (user.role === RoleEnum.VIEWER) {
+    if (!this.userCanPost(user)) {
       throw new ForbiddenException();
     }
-    if (user.role === RoleEnum.WRITER && post.authorId !== user.sub) {
+    if (user.role !== RoleEnum.ADMIN && post.authorId !== user.sub) {
       throw new ForbiddenException("Writer chi duoc ghim bai cua minh");
     }
     const pinPriority = user.role === RoleEnum.ADMIN ? 1 : 2;
@@ -430,10 +487,10 @@ export class PostsService {
     if (!post) {
       throw new NotFoundException("Post not found");
     }
-    if (user.role === RoleEnum.WRITER && post.authorId !== user.sub) {
+    if (user.role !== RoleEnum.ADMIN && post.authorId !== user.sub) {
       throw new ForbiddenException();
     }
-    if (user.role === RoleEnum.VIEWER) {
+    if (!this.userCanPost(user)) {
       throw new ForbiddenException();
     }
     const updated = await this.prisma.post.update({
@@ -492,7 +549,7 @@ export class PostsService {
       });
     }
 
-    if (post.author.role === RoleEnum.WRITER && post.authorId !== user.sub) {
+    if ((post.author.canPost || post.author.role === RoleEnum.ADMIN) && post.authorId !== user.sub) {
       const notification = await this.prisma.notification.create({
         data: {
           recipientId: post.authorId,
@@ -535,7 +592,8 @@ export class PostsService {
           select: {
             fullName: true,
             avatarUrl: true,
-            role: true
+            role: true,
+            canPost: true
           }
         },
         media: {
@@ -612,7 +670,8 @@ export class PostsService {
           select: {
             fullName: true,
             avatarUrl: true,
-            role: true
+            role: true,
+            canPost: true
           }
         },
         media: {
@@ -674,7 +733,8 @@ export class PostsService {
           select: {
             fullName: true,
             avatarUrl: true,
-            role: true
+            role: true,
+            canPost: true
           }
         },
         media: {
@@ -969,6 +1029,20 @@ export class PostsService {
       return text ? { id, type: "paragraph", text } : null;
     }
 
+    if (candidate.type === "heading") {
+      const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+      return text ? { id, type: "heading", text } : null;
+    }
+
+    if (candidate.type === "quote") {
+      const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+      return text ? { id, type: "quote", text } : null;
+    }
+
+    if (candidate.type === "divider") {
+      return { id, type: "divider" };
+    }
+
     if (candidate.type === "image") {
       if (typeof candidate.url !== "string" || typeof candidate.publicId !== "string") return null;
       return {
@@ -1061,10 +1135,14 @@ export class PostsService {
     if (user.role === RoleEnum.ADMIN) {
       return;
     }
-    if (user.role === RoleEnum.WRITER && user.sub === authorId) {
+    if (this.userCanPost(user) && user.sub === authorId) {
       return;
     }
     throw new ForbiddenException("Ban khong co quyen sua hoac xoa bai viet nay");
+  }
+
+  private userCanPost(user: Pick<AuthUser, "role" | "canPost">) {
+    return user.role === RoleEnum.ADMIN || Boolean(user.canPost);
   }
 
   private async deleteCloudinaryAsset(publicId: string, type: string) {

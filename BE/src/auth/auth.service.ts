@@ -37,38 +37,31 @@ export class AuthService {
     const email = payload.email.toLowerCase();
     const isAdmin = adminWhitelist.includes(email);
 
-    let user = await this.prisma.user.findUnique({
-      where: { googleSub: payload.sub },
-      include: { employee: true }
-    });
+    let user;
 
-    if (user) {
-      this.ensureEmployeeActive(user.employee);
-      user = await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          email,
-          fullName: payload.name,
-          avatarUrl: payload.picture || null,
-          role: isAdmin ? RoleEnum.ADMIN : undefined
-        },
-        include: { employee: true }
-      });
-    } else {
-      const existingByEmail = await this.prisma.user.findUnique({
-        where: { email },
-        include: { employee: true }
-      });
+    if (isAdmin) {
+      const existingAdmin =
+        (await this.prisma.user.findUnique({
+          where: { googleSub: payload.sub },
+          include: { employee: true }
+        })) ||
+        (await this.prisma.user.findUnique({
+          where: { email },
+          include: { employee: true }
+        }));
 
-      if (existingByEmail) {
-        this.ensureEmployeeActive(existingByEmail.employee);
+      if (existingAdmin) {
+        this.ensureEmployeeActive(existingAdmin.employee);
         user = await this.prisma.user.update({
-          where: { id: existingByEmail.id },
+          where: { id: existingAdmin.id },
           data: {
+            email,
             googleSub: payload.sub,
             fullName: payload.name,
             avatarUrl: payload.picture || null,
-            role: isAdmin ? RoleEnum.ADMIN : undefined
+            role: RoleEnum.ADMIN,
+            canPost: true,
+            canManageEmployees: true
           },
           include: { employee: true }
         });
@@ -79,7 +72,68 @@ export class AuthService {
             email,
             fullName: payload.name,
             avatarUrl: payload.picture || null,
-            role: isAdmin ? RoleEnum.ADMIN : RoleEnum.VIEWER
+            role: RoleEnum.ADMIN,
+            canPost: true,
+            canManageEmployees: true
+          },
+          include: { employee: true }
+        });
+      }
+    } else {
+      const employee = await this.prisma.employeeMaster.findUnique({
+        where: { loginEmail: email },
+        include: { linkedUser: { include: { employee: true } } }
+      });
+
+      if (!employee) {
+        throw new UnauthorizedException("Ban khong co quyen dang nhap qua Google. Vui long lien he voi Ninh de duoc cap tai khoan.");
+      }
+      if (!employee.isActive) {
+        throw new ForbiddenException("Tai khoan da bi khoa");
+      }
+
+      const existingUser =
+        employee.linkedUser ||
+        (await this.prisma.user.findUnique({
+          where: { googleSub: payload.sub },
+          include: { employee: true }
+        })) ||
+        (await this.prisma.user.findUnique({
+          where: { email },
+          include: { employee: true }
+        }));
+
+      if (existingUser?.employeeId && existingUser.employeeId !== employee.id) {
+        throw new UnauthorizedException("Ban khong co quyen dang nhap qua Google. Vui long lien he voi Ninh de duoc cap tai khoan.");
+      }
+
+      const nextRole = this.resolveUserRole(employee.canPost, employee.canManageEmployees);
+      if (existingUser) {
+        user = await this.prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            employeeId: employee.id,
+            email,
+            googleSub: payload.sub,
+            fullName: employee.fullName,
+            avatarUrl: payload.picture || null,
+            role: existingUser.role === RoleEnum.ADMIN ? RoleEnum.ADMIN : nextRole,
+            canPost: existingUser.role === RoleEnum.ADMIN ? existingUser.canPost : employee.canPost,
+            canManageEmployees: existingUser.role === RoleEnum.ADMIN ? existingUser.canManageEmployees : employee.canManageEmployees
+          },
+          include: { employee: true }
+        });
+      } else {
+        user = await this.prisma.user.create({
+          data: {
+            employeeId: employee.id,
+            email,
+            googleSub: payload.sub,
+            fullName: employee.fullName,
+            avatarUrl: payload.picture || null,
+            role: nextRole,
+            canPost: employee.canPost,
+            canManageEmployees: employee.canManageEmployees
           },
           include: { employee: true }
         });
@@ -94,40 +148,9 @@ export class AuthService {
   }
 
   async linkMsnv(userId: string, msnv: string) {
-    const employee = await this.prisma.employeeMaster.findUnique({ where: { msnv } });
-    if (!employee) {
-      throw new BadRequestException("MSNV khong hop le");
-    }
-    if (!employee.isActive) {
-      throw new ForbiddenException("Tai khoan nhan su dang bi vo hieu hoa");
-    }
-    const userByMsnv = await this.prisma.user.findUnique({
-      where: { employeeId: employee.id }
-    });
-    if (userByMsnv && userByMsnv.id !== userId) {
-      throw new BadRequestException("MSNV da duoc dang ky");
-    }
-
-    const current = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!current) {
-      throw new UnauthorizedException();
-    }
-
-    const nextRole = current.role === RoleEnum.ADMIN ? RoleEnum.ADMIN : employee.preferredRole;
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        employeeId: employee.id,
-        fullName: employee.fullName,
-        role: nextRole
-      },
-      include: { employee: true }
-    });
-    return {
-      token: this.signJwt(user),
-      linked: true,
-      profile: this.serializeProfile(user)
-    };
+    void userId;
+    void msnv;
+    throw new ForbiddenException("Khong con ho tro tu lien ket MSNV sau khi dang nhap Google");
   }
 
   async employeeLogin(msnv: string, password: string) {
@@ -151,15 +174,19 @@ export class AuthService {
           where: { id: employee.linkedUser.id },
           data: {
             fullName: employee.fullName,
-            role: employee.linkedUser.role === RoleEnum.ADMIN ? RoleEnum.ADMIN : employee.preferredRole
+            role: employee.linkedUser.role === RoleEnum.ADMIN ? RoleEnum.ADMIN : this.resolveUserRole(employee.canPost, employee.canManageEmployees),
+            canPost: employee.linkedUser.role === RoleEnum.ADMIN ? employee.linkedUser.canPost : employee.canPost,
+            canManageEmployees: employee.linkedUser.role === RoleEnum.ADMIN ? employee.linkedUser.canManageEmployees : employee.canManageEmployees
           },
           include: { employee: true }
         })
       : await this.prisma.user.create({
           data: {
             fullName: employee.fullName,
-            role: employee.preferredRole,
-            employeeId: employee.id
+            role: this.resolveUserRole(employee.canPost, employee.canManageEmployees),
+            employeeId: employee.id,
+            canPost: employee.canPost,
+            canManageEmployees: employee.canManageEmployees
           },
           include: { employee: true }
         });
@@ -193,6 +220,7 @@ export class AuthService {
         passwordHash: hashPassword(newPassword),
         temporaryPasswordPreview: null,
         mustChangePassword: false,
+        activatedAt: user.employee.activatedAt ?? new Date(),
         passwordChangedAt: new Date()
       }
     });
@@ -218,6 +246,8 @@ export class AuthService {
       fullName: user.fullName,
       avatarUrl: user.avatarUrl,
       role: user.role,
+      canPost: user.canPost,
+      canManageEmployees: user.canManageEmployees,
       linkedMsnv: user.employee?.msnv ?? null,
       linked: this.isLinked(user.role, user.employee),
       mustChangePassword: user.employee?.mustChangePassword ?? false,
@@ -231,6 +261,8 @@ export class AuthService {
     fullName: string;
     avatarUrl: string | null;
     role: string;
+    canPost: boolean;
+    canManageEmployees: boolean;
     themeKey: string;
     employee?: { msnv: string; mustChangePassword?: boolean } | null;
   }) {
@@ -240,6 +272,8 @@ export class AuthService {
       fullName: user.fullName,
       avatarUrl: user.avatarUrl,
       role: user.role,
+      canPost: user.canPost,
+      canManageEmployees: user.canManageEmployees,
       linkedMsnv: user.employee?.msnv ?? null,
       linked: this.isLinked(user.role, user.employee),
       mustChangePassword: user.employee?.mustChangePassword ?? false,
@@ -254,14 +288,30 @@ export class AuthService {
     return Boolean(employee);
   }
 
-  private signJwt(user: { id: string; role: string; email: string | null; fullName: string; employee?: { msnv: string } | null }) {
+  private signJwt(user: {
+    id: string;
+    role: string;
+    canPost: boolean;
+    canManageEmployees: boolean;
+    email: string | null;
+    fullName: string;
+    employee?: { msnv: string } | null;
+  }) {
     return this.jwt.sign({
       sub: user.id,
       role: user.role,
+      canPost: user.canPost,
+      canManageEmployees: user.canManageEmployees,
       email: user.email ?? "",
       fullName: user.fullName,
       linkedMsnv: user.employee?.msnv ?? null
     });
+  }
+
+  private resolveUserRole(canPost: boolean, canManageEmployees: boolean) {
+    if (canPost) return RoleEnum.WRITER;
+    if (canManageEmployees) return RoleEnum.HR_MANAGER;
+    return RoleEnum.VIEWER;
   }
 
   private ensureEmployeeActive(employee: { isActive?: boolean } | null | undefined) {

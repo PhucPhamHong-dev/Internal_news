@@ -69,7 +69,7 @@ export function SearchPanel({ open, query, onChangeQuery, onClose, suggestions, 
             <p className="mt-1 text-sm text-slate-500">Tìm theo tiêu đề hoặc nội dung bài viết nội bộ.</p>
           </div>
           <button
-            className="icon-btn h-10 w-10 rounded-full border border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+            className="icon-btn theme-primary-border-hover h-10 w-10 rounded-full border border-slate-200 bg-white hover:bg-[color:var(--app-accent-faint)] hover:text-[color:var(--app-accent)]"
             onClick={onClose}
             aria-label="Đóng"
           >
@@ -78,7 +78,7 @@ export function SearchPanel({ open, query, onChangeQuery, onClose, suggestions, 
         </div>
 
         <div className="p-5 sm:p-6">
-          <div className="mb-5 flex items-center gap-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus-within:border-blue-300 focus-within:bg-white">
+          <div className="theme-primary-focus mb-5 flex items-center gap-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm focus-within:bg-white">
             <Search size={18} className="text-slate-400" />
             <input
               value={query}
@@ -95,7 +95,7 @@ export function SearchPanel({ open, query, onChangeQuery, onClose, suggestions, 
               suggestions.map((item, index) => (
                 <button
                   key={item.id}
-                  className={`flex w-full items-start gap-4 px-5 py-4 text-left transition hover:bg-blue-50/60 sm:px-6 ${
+                  className={`flex w-full items-start gap-4 px-5 py-4 text-left transition hover:bg-[color:var(--app-accent-faint)] sm:px-6 ${
                     index < suggestions.length - 1 ? "border-b border-slate-100" : ""
                   }`}
                   onClick={() => {
@@ -109,7 +109,7 @@ export function SearchPanel({ open, query, onChangeQuery, onClose, suggestions, 
                         <Clock3 size={12} />
                         {formatSearchTime(item.createdAt)}
                       </span>
-                      {item.thumbnailUrl && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-600">Có media</span>}
+                      {item.thumbnailUrl && <span className="theme-primary-soft rounded-full px-2 py-0.5">Có media</span>}
                     </div>
                     <div className="mt-2 text-[15px] font-semibold leading-6 text-slate-900">{item.title}</div>
                     <div className="mt-1 text-sm leading-6 text-slate-500">{getExcerpt(item.content)}</div>

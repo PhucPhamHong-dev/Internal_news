@@ -14,7 +14,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; role: string; email: string; fullName: string; linkedMsnv: string | null }) {
+  async validate(payload: {
+    sub: string;
+    role: string;
+    canPost: boolean;
+    canManageEmployees: boolean;
+    email: string;
+    fullName: string;
+    linkedMsnv: string | null;
+  }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: { employee: true }
@@ -28,6 +36,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       sub: user.id,
       role: user.role,
+      canPost: user.canPost,
+      canManageEmployees: user.canManageEmployees,
       email: user.email ?? "",
       fullName: user.fullName,
       linkedMsnv: user.employee?.msnv ?? null

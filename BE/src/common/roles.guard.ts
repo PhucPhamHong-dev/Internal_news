@@ -16,6 +16,16 @@ export class RolesGuard implements CanActivate {
       return true;
     }
     const { user } = context.switchToHttp().getRequest();
-    return requiredRoles.includes(user.role as RoleEnum);
+    if (user.role === RoleEnum.ADMIN) {
+      return true;
+    }
+
+    return requiredRoles.some((requiredRole) => {
+      if (requiredRole === RoleEnum.ADMIN) return user.role === RoleEnum.ADMIN;
+      if (requiredRole === RoleEnum.WRITER) return Boolean(user.canPost);
+      if (requiredRole === RoleEnum.HR_MANAGER) return Boolean(user.canManageEmployees);
+      if (requiredRole === RoleEnum.VIEWER) return true;
+      return requiredRole === (user.role as RoleEnum);
+    });
   }
 }

@@ -9,6 +9,7 @@ datasource db {
 
 enum Role {
   ADMIN
+  HR_MANAGER
   WRITER
   VIEWER
 }
@@ -39,11 +40,15 @@ model EmployeeMaster {
   id                       String   @id @default(cuid())
   msnv                     String   @unique
   fullName                 String
+  loginEmail               String?  @unique
   isActive                 Boolean  @default(true)
   preferredRole            Role     @default(VIEWER)
+  canPost                  Boolean  @default(false)
+  canManageEmployees       Boolean  @default(false)
   passwordHash             String?
   temporaryPasswordPreview String?
   mustChangePassword       Boolean  @default(false)
+  activatedAt              DateTime?
   passwordChangedAt        DateTime?
   createdAt                DateTime @default(now())
   linkedUser               User?
@@ -59,6 +64,8 @@ model User {
   fullName      String
   avatarUrl     String?
   role          Role                @default(VIEWER)
+  canPost       Boolean             @default(false)
+  canManageEmployees Boolean        @default(false)
   employeeId    String?             @unique
   employee      EmployeeMaster?     @relation(fields: [employeeId], references: [id])
   posts         Post[]

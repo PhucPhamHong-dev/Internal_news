@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { CurrentUser, type AuthUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RoleEnum } from "../common/enums";
 import { Roles } from "../common/roles.decorator";
@@ -12,16 +13,18 @@ import { UpdateManagedUserDto } from "./dto/update-managed-user.dto";
 
 @Controller("admin")
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(RoleEnum.ADMIN)
+@Roles(RoleEnum.ADMIN, RoleEnum.HR_MANAGER)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Post("notifications/broadcast")
+  @Roles(RoleEnum.ADMIN)
   broadcast(@Body() body: BroadcastDto) {
     return this.adminService.broadcast(body.message.trim());
   }
 
   @Get("comments/:commentId/identity")
+  @Roles(RoleEnum.ADMIN)
   identity(@Param("commentId") commentId: string) {
     return this.adminService.getCommentIdentity(commentId);
   }
@@ -31,7 +34,7 @@ export class AdminController {
     @Query("page") page?: string,
     @Query("pageSize") pageSize?: string,
     @Query("q") q?: string,
-    @Query("filter") filter?: "ALL" | "PENDING" | "LINKED" | "ACTIVE" | "DISABLED"
+    @Query("filter") filter?: "ALL" | "ACTIVE" | "INACTIVE" | "DISABLED"
   ) {
     return this.adminService.listUsers({
       page: page ? Number(page) : undefined,
@@ -42,20 +45,29 @@ export class AdminController {
   }
 
   @Post("users")
-  createUser(@Body() body: CreateManagedUserDto) {
-    return this.adminService.createUser(body.msnv.trim().toUpperCase(), body.fullName.trim(), body.initialPassword?.trim());
+  createUser(@CurrentUser() user: AuthUser, @Body() body: CreateManagedUserDto) {
+    return this.adminService.createUser(user, {
+      msnv: body.msnv.trim().toUpperCase(),
+      fullName: body.fullName.trim(),
+      initialPassword: body.initialPassword?.trim(),
+      canPost: body.canPost,
+      canManageEmployees: body.canManageEmployees
+    });
   }
 
   @Patch("users/:employeeId")
-  updateUser(@Param("employeeId") employeeId: string, @Body() body: UpdateManagedUserDto) {
-    return this.adminService.updateUser(employeeId, {
+  updateUser(@CurrentUser() user: AuthUser, @Param("employeeId") employeeId: string, @Body() body: UpdateManagedUserDto) {
+    return this.adminService.updateUser(user, employeeId, {
       fullName: body.fullName?.trim(),
       isActive: body.isActive,
-      preferredRole: body.preferredRole
+      canPost: body.canPost,
+      canManageEmployees: body.canManageEmployees,
+      loginEmail: body.loginEmail == null ? body.loginEmail : body.loginEmail.trim().toLowerCase()
     });
   }
 
   @Post("users/:employeeId/unlink-gmail")
+  @Roles(RoleEnum.ADMIN)
   unlinkGmail(@Param("employeeId") employeeId: string) {
     return this.adminService.unlinkGmail(employeeId);
   }
@@ -66,6 +78,7 @@ export class AdminController {
   }
 
   @Post("posts/as-user/:employeeId")
+  @Roles(RoleEnum.ADMIN)
   composeAsUser(@Param("employeeId") employeeId: string, @Body() body: CreatePostDto) {
     return this.adminService.composeAsUser(employeeId, body);
   }

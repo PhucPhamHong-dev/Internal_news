@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 
 export class CreateManagedUserDto {
   @IsString()
@@ -16,4 +16,12 @@ export class CreateManagedUserDto {
   @MinLength(6)
   @MaxLength(120)
   initialPassword?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  canPost?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canManageEmployees?: boolean;
 }

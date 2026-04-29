@@ -1,19 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { ArrowLeft } from "lucide-react";
-import { CredentialResponse, GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
 import { useParams, useRouter } from "next/navigation";
-import { apiRequest } from "@/components/api";
-import { Profile, useAuthStore } from "@/components/auth-store";
-import { CompanyLogo } from "@/components/company-logo";
-import { MsnvModal } from "@/components/msnv-modal";
+import { ApiError, apiRequest } from "@/components/api";
+import { Profile } from "@/components/auth-store";
 import { PostDetailView } from "@/components/post-detail-view";
 import { FeedPost } from "@/components/post-shared";
 import { RelatedPostsSection } from "@/components/related-posts-section";
-
-const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+import { useAuthRedirect } from "@/components/use-auth-redirect";
 
 function DetailSkeleton() {
   return (
@@ -42,12 +38,10 @@ function DetailSkeleton() {
   );
 }
 
-function PostDetailPageContent() {
+export default function PostDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { token, profile, initialized, setProfile, saveAuth, clearAuth } = useAuthStore();
-  const [loading, setLoading] = useState(false);
-
+  const { token, profile, initialized, setProfile, clearAuth, isAuthenticated } = useAuthRedirect();
   const postId = useMemo(() => params.id, [params.id]);
 
   const fetchMe = async (authToken: string) => {
@@ -57,7 +51,13 @@ function PostDetailPageContent() {
 
   useEffect(() => {
     if (!initialized || !token) return;
-    void fetchMe(token).catch(() => clearAuth());
+    void fetchMe(token).catch((error) => {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        clearAuth();
+      } else {
+        console.error("Khong the dong bo phien dang nhap tu /me", error);
+      }
+    });
   }, [initialized, token, clearAuth, setProfile]);
 
   const postQuery = useQuery({
@@ -77,46 +77,8 @@ function PostDetailPageContent() {
     void apiRequest(`/posts/${postId}/view`, token, "POST").catch(() => undefined);
   }, [postId, profile?.linked, token]);
 
-  const handleGoogleLogin = async (credentialResponse: CredentialResponse) => {
-    if (!credentialResponse.credential) return;
-    setLoading(true);
-    try {
-      const response = await apiRequest<{ token: string; profile: Profile }>("/auth/google/callback", null, "POST", {
-        idToken: credentialResponse.credential
-      });
-      saveAuth(response.token, response.profile);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleMsnvSubmit = async (msnv: string) => {
-    if (!token) return;
-    const response = await apiRequest<{ token: string; profile: Profile }>("/auth/link-msnv", token, "POST", { msnv });
-    saveAuth(response.token, response.profile);
-    await Promise.all([postQuery.refetch(), relatedQuery.refetch()]);
-  };
-
-  if (!initialized || (token && !profile)) {
+  if (!initialized || !isAuthenticated || !token || !profile) {
     return <DetailSkeleton />;
-  }
-
-  if (!token || !profile) {
-    return (
-      <main className="grid min-h-screen place-items-center px-4">
-        <section className="card w-full max-w-md p-7 text-center sm:p-8">
-          <div className="flex justify-center">
-            <CompanyLogo imageClassName="h-20 w-auto" />
-          </div>
-          <h1 className="mt-5 text-3xl font-extrabold tracking-tight text-slate-900">Bản tin nội bộ</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-500">Đăng nhập bằng Google để xem chi tiết bài viết.</p>
-          <div className="mt-6 flex justify-center">
-            <GoogleLogin onSuccess={handleGoogleLogin} onError={() => undefined} />
-          </div>
-          {loading && <p className="mt-4 text-sm text-slate-500">Đang xác thực...</p>}
-        </section>
-      </main>
-    );
   }
 
   return (
@@ -147,16 +109,6 @@ function PostDetailPageContent() {
       ) : (
         <DetailSkeleton />
       )}
-
-      {!profile.linked && <MsnvModal onSubmit={handleMsnvSubmit} loading={loading} />}
     </section>
-  );
-}
-
-export default function PostDetailPage() {
-  return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <PostDetailPageContent />
-    </GoogleOAuthProvider>
   );
 }

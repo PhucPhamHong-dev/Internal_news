@@ -2,6 +2,18 @@
 
 import { useEffect, useState } from "react";
 
+export type ReactionType = "LIKE" | "LOVE" | "CARE" | "HAHA" | "WOW" | "SAD" | "ANGRY";
+
+export const REACTION_OPTIONS: Array<{ type: ReactionType; icon: string; label: string }> = [
+  { type: "LIKE", icon: "👍", label: "Thích" },
+  { type: "LOVE", icon: "❤️", label: "Yêu thích" },
+  { type: "CARE", icon: "🥰", label: "Quan tâm" },
+  { type: "HAHA", icon: "😄", label: "Haha" },
+  { type: "WOW", icon: "😮", label: "Wow" },
+  { type: "SAD", icon: "😢", label: "Buồn" },
+  { type: "ANGRY", icon: "😡", label: "Giận" }
+];
+
 export type FeedPost = {
   id: string;
   authorId: string;
@@ -9,7 +21,7 @@ export type FeedPost = {
   content: string;
   authorName: string;
   authorAvatar: string | null;
-  authorRole: "ADMIN" | "WRITER" | "VIEWER";
+  authorRole: "ADMIN" | "HR_MANAGER" | "WRITER" | "VIEWER";
   isPinned: boolean;
   pinPriority: number | null;
   createdAt: string;
@@ -17,13 +29,26 @@ export type FeedPost = {
   commentCount: number;
   viewCount: number;
   likedByMe: boolean;
-  myReaction?: "LIKE" | "LOVE" | "CARE" | "HAHA" | "WOW" | "SAD" | "ANGRY" | null;
+  myReaction?: ReactionType | null;
   blocks?: PostContentBlock[];
-  media: Array<{ id: string; type: "IMAGE" | "VIDEO"; url: string; thumbnailUrl?: string | null; caption?: string | null }>;
+  media: Array<{
+    id: string;
+    type: "IMAGE" | "VIDEO";
+    url: string;
+    thumbnailUrl?: string | null;
+    caption?: string | null;
+    publicId?: string;
+    thumbnailPublicId?: string | null;
+    clientBlockId?: string | null;
+    sortOrder?: number | null;
+  }>;
 };
 
 export type PostContentBlock =
   | { id: string; type: "paragraph"; text: string }
+  | { id: string; type: "heading"; text: string }
+  | { id: string; type: "quote"; text: string }
+  | { id: string; type: "divider" }
   | {
       id: string;
       type: "image";
@@ -132,12 +157,30 @@ function formatAbsoluteDate(createdAt: string) {
 }
 
 function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || "NV";
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length === 0) return "NV";
+  if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "N";
+  return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toUpperCase();
 }
 
 function getHash(value: string) {
   return Array.from(value).reduce((hash, char) => hash + char.charCodeAt(0), 0);
+}
+
+function getAvatarPalette(value: string) {
+  const palettes = [
+    ["#e0f2fe", "#38bdf8"],
+    ["#dcfce7", "#34d399"],
+    ["#fef3c7", "#f59e0b"],
+    ["#fce7f3", "#f472b6"],
+    ["#ede9fe", "#8b5cf6"],
+    ["#ffedd5", "#fb923c"]
+  ];
+  return palettes[getHash(value) % palettes.length];
 }
 
 export function Avatar({ name, avatarUrl, size = "h-12 w-12" }: { name: string; avatarUrl: string | null; size?: string }) {
@@ -145,9 +188,15 @@ export function Avatar({ name, avatarUrl, size = "h-12 w-12" }: { name: string; 
     return <img src={avatarUrl} alt={name} className={`${size} rounded-full object-cover shadow-sm`} />;
   }
 
+  const initials = getInitials(name);
+  const [from, to] = getAvatarPalette(name);
+
   return (
-    <div className={`${size} flex items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-700`}>
-      {getInitials(name)}
+    <div
+      className={`${size} flex items-center justify-center rounded-full text-sm font-bold text-slate-800 shadow-sm ring-1 ring-white/70`}
+      style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}
+    >
+      {initials}
     </div>
   );
 }

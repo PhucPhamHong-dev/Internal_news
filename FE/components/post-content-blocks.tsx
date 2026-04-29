@@ -53,6 +53,26 @@ export function PostContentBlocks({ blocks, fallbackContent, fallbackMedia }: Po
           );
         }
 
+        if (block.type === "heading") {
+          return (
+            <h3 key={block.id} className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+              {block.text}
+            </h3>
+          );
+        }
+
+        if (block.type === "quote") {
+          return (
+            <blockquote key={block.id} className="rounded-r-[22px] border-l-4 border-[color:var(--primary)] bg-[color:var(--primary-faint)] px-5 py-4 text-[15px] italic leading-7 text-slate-700 sm:text-base">
+              {block.text}
+            </blockquote>
+          );
+        }
+
+        if (block.type === "divider") {
+          return <hr key={block.id} className="border-slate-200" />;
+        }
+
         if (block.type === "video") {
           return (
             <figure key={block.id} className="space-y-2">

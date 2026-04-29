@@ -2,6 +2,7 @@
 
 import { LogOut, Shield } from "lucide-react";
 import { CompanyLogo } from "./company-logo";
+import { ThemePicker } from "./theme-picker";
 
 type HeaderProps = {
   unreadCount: number;
@@ -18,9 +19,10 @@ export function Header({ onLogout, showAdminEntry = false, onOpenAdmin }: Header
         <div className="w-24" />
         <CompanyLogo compact imageClassName="h-10 w-auto" />
         <div className="flex w-24 items-center justify-end gap-2">
+          <ThemePicker />
           {showAdminEntry && onOpenAdmin && (
             <button
-              className="icon-btn h-10 w-10 rounded-full border border-slate-200 bg-white/80 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+              className="icon-btn theme-primary-border-hover h-10 w-10 rounded-full border border-slate-200 bg-white/80 text-slate-600 hover:bg-[color:var(--app-accent-faint)] hover:text-[color:var(--app-accent)]"
               onClick={onOpenAdmin}
               aria-label="Quản lý người dùng"
             >
@@ -28,7 +30,7 @@ export function Header({ onLogout, showAdminEntry = false, onOpenAdmin }: Header
             </button>
           )}
           <button
-            className="icon-btn h-10 w-10 rounded-full border border-slate-200 bg-white/80 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+            className="icon-btn theme-primary-border-hover h-10 w-10 rounded-full border border-slate-200 bg-white/80 text-slate-600 hover:bg-[color:var(--app-accent-faint)] hover:text-[color:var(--app-accent)]"
             onClick={onLogout}
             aria-label="Đăng xuất"
           >

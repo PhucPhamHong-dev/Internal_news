@@ -1,9 +1,9 @@
-import { IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { IsNotEmpty, IsString, MaxLength, MinLength } from "class-validator";
 
 export class ResetManagedPasswordDto {
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MinLength(6)
   @MaxLength(120)
-  newPassword?: string;
+  newPassword!: string;
 }

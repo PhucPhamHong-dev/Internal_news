@@ -5,14 +5,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Heart, MoreHorizontal, PenSquare, Pin, SendHorizontal, Trash2, X } from "lucide-react";
 import { apiRequest } from "./api";
 import { Profile } from "./auth-store";
+import { EditablePost, PostEditorModal } from "./post-editor-modal";
 import { PostContentBlocks } from "./post-content-blocks";
 import { capturePostQueryState, restorePostQueryState, updatePostCounters } from "./post-query-cache";
+import { ReactionSummaryModal } from "./reaction-summary-modal";
 import {
   AnonymousAvatar,
   Avatar,
   CommentConnection,
   CommentItem,
   FeedPost,
+  REACTION_OPTIONS,
   RelativeTime,
   ReplyConnection,
   ReplyItem,
@@ -54,15 +57,6 @@ type HydratedComment = CommentItem & {
 
 const COMMENT_PAGE_SIZE = 5;
 const REPLY_PAGE_SIZE = 3;
-const REACTIONS = [
-  { type: "LIKE", icon: "👍", label: "Thích" },
-  { type: "LOVE", icon: "❤️", label: "Yêu thích" },
-  { type: "CARE", icon: "🥰", label: "Quan tâm" },
-  { type: "HAHA", icon: "😄", label: "Haha" },
-  { type: "WOW", icon: "😮", label: "Wow" },
-  { type: "SAD", icon: "😢", label: "Buồn" },
-  { type: "ANGRY", icon: "😡", label: "Giận" }
-] as const;
 
 function CommentsSkeleton({ count = 3 }: { count?: number }) {
   return (
@@ -123,25 +117,24 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
   const [replyState, setReplyState] = useState<Record<string, ReplyState>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [editTitle, setEditTitle] = useState(post.title);
-  const [editContent, setEditContent] = useState(post.content);
-  const [editBusy, setEditBusy] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
+  const [editPost, setEditPost] = useState<EditablePost | null>(post as EditablePost);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editLoadError, setEditLoadError] = useState<string | null>(null);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [reactionSummaryOpen, setReactionSummaryOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const reactionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canPin = useMemo(() => {
     if (profile.role === "ADMIN") return true;
-    if (profile.role === "WRITER") return post.authorId === profile.id;
-    return false;
-  }, [post.authorId, profile.id, profile.role]);
+    return profile.canPost && post.authorId === profile.id;
+  }, [post.authorId, profile.canPost, profile.id, profile.role]);
 
   const canManagePost = useMemo(() => {
     if (profile.role === "ADMIN") return true;
-    return profile.role === "WRITER" && post.authorId === profile.id;
-  }, [post.authorId, profile.id, profile.role]);
-  const activePostReaction = REACTIONS.find((item) => item.type === post.myReaction);
+    return profile.canPost && post.authorId === profile.id;
+  }, [post.authorId, profile.canPost, profile.id, profile.role]);
+  const activePostReaction = REACTION_OPTIONS.find((item) => item.type === post.myReaction);
 
   const commentsQuery = useInfiniteQuery({
     queryKey: commentsQueryKey,
@@ -155,9 +148,8 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
   });
 
   useEffect(() => {
-    setEditTitle(post.title);
-    setEditContent(post.content);
-  }, [post.content, post.title]);
+    setEditPost(post as EditablePost);
+  }, [post]);
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
@@ -229,7 +221,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     reactionsTimerRef.current = setTimeout(() => setReactionsOpen(false), 220);
   };
 
-  const setPostReaction = async (reactionType: (typeof REACTIONS)[number]["type"] | null) => {
+  const setPostReaction = async (reactionType: (typeof REACTION_OPTIONS)[number]["type"] | null) => {
     const nextLiked = Boolean(reactionType);
     const snapshot = capturePostQueryState(queryClient, post.id);
 
@@ -434,23 +426,19 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     }
   };
 
-  const submitEditPost = async () => {
-    if (!editTitle.trim() || !editContent.trim()) return;
-
+  const openEditModal = async () => {
     try {
-      setEditBusy(true);
-      setEditError(null);
-      await apiRequest(`/posts/${post.id}`, token, "PATCH", {
-        title: editTitle,
-        content: editContent
-      });
-      setEditOpen(false);
+      setEditLoading(true);
+      setEditLoadError(null);
+      const detail = await apiRequest<EditablePost>(`/posts/${post.id}`, token, "GET");
+      setEditPost(detail);
+      setEditOpen(true);
       setMenuOpen(false);
-      await onRefreshPost();
     } catch (error) {
-      setEditError(error instanceof Error ? error.message : "Không thể cập nhật bài viết");
+      setEditLoadError(error instanceof Error ? error.message : "Khong the tai bai viet");
+      setEditOpen(true);
     } finally {
-      setEditBusy(false);
+      setEditLoading(false);
     }
   };
 
@@ -471,7 +459,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     const content = (
       <>
         <div className="flex flex-wrap items-center gap-2 text-[14px] text-slate-500">
-          <span className={`font-semibold text-slate-900 ${profile.role === "ADMIN" ? "hover:text-blue-600 hover:underline" : ""}`}>{item.nickname}</span>
+          <span className={`font-semibold text-slate-900 ${profile.role === "ADMIN" ? "hover:text-[color:var(--app-accent)] hover:underline" : ""}`}>{item.nickname}</span>
           <span>·</span>
           <RelativeTime createdAt={item.createdAt} />
           {item.optimistic && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600">Đang gửi</span>}
@@ -487,7 +475,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
     return (
       <button
         type="button"
-        className="w-full rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50/70"
+        className="theme-primary-border-hover w-full rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:bg-[color:var(--app-accent-faint)]"
         onClick={onInspect}
       >
         {content}
@@ -530,7 +518,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
                 </div>
                 {post.title.trim() && <h1 className="mt-1 text-[24px] font-bold leading-tight text-slate-900">{post.title}</h1>}
                 {post.isPinned && (
-                  <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-600">
+                  <div className="theme-primary-soft mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold">
                     <Pin size={11} />
                     Ưu tiên {post.pinPriority}
                   </div>
@@ -540,7 +528,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
               <div className="flex items-center gap-2 text-slate-400">
                 {canPin && (
                   <button
-                    className="icon-btn h-9 w-9 rounded-full hover:bg-blue-50 hover:text-blue-600"
+                    className="icon-btn h-9 w-9 rounded-full hover:bg-[color:var(--app-accent-faint)] hover:text-[color:var(--app-accent)]"
                     onClick={async () => {
                       if (post.isPinned) {
                         await apiRequest(`/posts/${post.id}/pin`, token, "DELETE");
@@ -569,10 +557,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
                       <div className="absolute right-0 top-10 z-10 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_20px_45px_-28px_rgba(15,23,42,0.3)]">
                         <button
                           className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                          onClick={() => {
-                            setEditOpen(true);
-                            setMenuOpen(false);
-                          }}
+                          onClick={() => void openEditModal()}
                         >
                           <PenSquare size={16} />
                           <span>Sửa bài viết</span>
@@ -596,8 +581,9 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
             <div className="mt-5 flex items-center gap-6 text-[14px] text-slate-500">
               <div className="relative" onMouseEnter={openReactions} onMouseLeave={closeReactions}>
                 <button
-                  className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "text-blue-600" : ""}`}
-                  onClick={() => void setPostReaction(post.likedByMe ? null : "LIKE")}
+                  className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "theme-primary-text" : ""}`}
+                  onClick={() => setReactionSummaryOpen(true)}
+                  aria-label="Xem thống kê cảm xúc"
                 >
                   {activePostReaction ? <span className="text-lg leading-none">{activePostReaction.icon}</span> : <Heart size={20} />}
                   <span>{post.likeCount}</span>
@@ -607,14 +593,14 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
                     reactionsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"
                   }`}
                 >
-                  {REACTIONS.map((reaction) => (
+                  {REACTION_OPTIONS.map((reaction) => (
                     <button
                       key={reaction.type}
                       className="flex h-9 w-9 items-center justify-center rounded-full text-xl transition hover:-translate-y-1 hover:bg-slate-50"
                       title={reaction.label}
                       onClick={() => {
                         setReactionsOpen(false);
-                        void setPostReaction(reaction.type);
+                        void setPostReaction(post.myReaction === reaction.type ? null : reaction.type);
                       }}
                     >
                       {reaction.icon}
@@ -639,7 +625,6 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
       <section id="comments" className="card mt-4 overflow-hidden">
         <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
           <h2 className="text-lg font-bold text-slate-900">Bình luận</h2>
-          <p className="mt-1 text-sm text-slate-500">Bài viết hiển thị ngay, bình luận sẽ tải tiếp theo từng đợt nhẹ hơn.</p>
         </div>
 
         <div className="px-5 py-5 sm:px-6">
@@ -671,7 +656,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
 
                         {comment.hasMoreReplies && (
                           <button
-                            className="pl-12 text-sm font-medium text-blue-600 transition hover:text-blue-700"
+                            className="theme-primary-text pl-12 text-sm font-medium transition hover:text-[color:var(--app-accent-hover)]"
                             onClick={() => void loadMoreReplies(comment.id, comment.nextReplyCursor)}
                             disabled={comment.replyLoading}
                           >
@@ -702,9 +687,9 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
         </div>
         <div className="border-t border-slate-100 px-5 py-4 sm:px-6">
           {replyTarget && (
-            <div className="mb-3 flex items-center justify-between rounded-2xl bg-blue-50 px-4 py-2 text-sm text-blue-700">
+            <div className="theme-primary-soft mb-3 flex items-center justify-between rounded-2xl px-4 py-2 text-sm">
               <span>Đang trả lời {replyTarget.nickname}</span>
-              <button className="font-medium text-blue-600 hover:text-blue-700" onClick={() => setReplyTarget(null)}>
+              <button className="theme-primary-text font-medium hover:text-[color:var(--app-accent-hover)]" onClick={() => setReplyTarget(null)}>
                 Bỏ chọn
               </button>
             </div>
@@ -715,12 +700,20 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
           <div className="flex items-center gap-3">
             <AnonymousAvatar nickname={`${profile.id}-${post.id}`} size="h-11 w-11" />
 
-            <div className="flex min-h-14 flex-1 items-center rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-3 focus-within:border-blue-300 focus-within:bg-white">
+            <div className="theme-primary-focus flex min-h-14 flex-1 items-center rounded-[28px] border border-slate-200 bg-slate-50 px-4 py-3 focus-within:bg-white">
               <textarea
                 rows={1}
                 className="w-full resize-none overflow-hidden bg-transparent text-[15px] leading-6 text-slate-700 outline-none placeholder:text-slate-400"
                 placeholder={replyTarget ? `Trả lời ${replyTarget.nickname}...` : "Viết bình luận ẩn danh..."}
                 value={commentInput}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (commentInput.trim()) {
+                      void submitComment();
+                    }
+                  }
+                }}
                 onChange={(event) => {
                   setCommentInput(event.target.value);
                   resizeTextarea(event.target, 160);
@@ -729,7 +722,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
             </div>
 
             <button
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="theme-primary-bg theme-primary-bg-hover inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40"
               disabled={commentBusy || !commentInput.trim()}
               onClick={() => void submitComment()}
             >
@@ -740,59 +733,15 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
       </section>
 
       {editOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/20 p-4 backdrop-blur-sm" onClick={() => setEditOpen(false)}>
-          <div
-            className="mx-auto w-full max-w-2xl rounded-[32px] border border-slate-200 bg-white text-slate-900 shadow-[0_35px_90px_-45px_rgba(15,23,42,0.3)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-              <div className="w-10" />
-              <h2 className="text-2xl font-bold tracking-tight">Sửa bài viết</h2>
-              <button
-                className="icon-btn h-10 w-10 rounded-full border border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-                onClick={() => setEditOpen(false)}
-                aria-label="Đóng"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4 px-6 py-5">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-600">Tiêu đề</label>
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
-                  value={editTitle}
-                  onChange={(event) => setEditTitle(event.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-600">Nội dung</label>
-                <textarea
-                  className="min-h-48 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
-                  value={editContent}
-                  onChange={(event) => setEditContent(event.target.value)}
-                />
-              </div>
-
-              {editError && <div className="text-sm text-red-600">{editError}</div>}
-
-              <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
-                <button className="rounded-2xl border border-slate-200 px-5 py-2.5 text-slate-600 transition hover:bg-slate-50" onClick={() => setEditOpen(false)}>
-                  Đóng
-                </button>
-                <button
-                  className="rounded-2xl bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() => void submitEditPost()}
-                  disabled={editBusy || !editTitle.trim() || !editContent.trim()}
-                >
-                  {editBusy ? "Đang lưu..." : "Lưu thay đổi"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PostEditorModal
+          mode="edit"
+          token={token}
+          post={editPost}
+          loading={editLoading}
+          loadError={editLoadError}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => void onRefreshPost()}
+        />
       )}
       {identityModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/18 p-4 backdrop-blur-sm" onClick={closeIdentityModal}>
@@ -860,6 +809,7 @@ export function PostDetailView({ post, token, profile, onRefreshPost, onDeleted 
           </div>
         </div>
       )}
+      <ReactionSummaryModal open={reactionSummaryOpen} postId={post.id} token={token} onClose={() => setReactionSummaryOpen(false)} />
     </>
   );
 }

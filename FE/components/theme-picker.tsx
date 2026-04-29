@@ -1,145 +1,119 @@
 "use client";
 
-import { Settings2 } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { apiRequest } from "./api";
-import { useAuthStore } from "./auth-store";
+import { THEMES, applyTheme, persistTheme, readStoredTheme } from "./theme-utils";
 
-const THEME_KEY = "internal_threads_theme";
+type ThemePickerProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+};
 
-const THEMES = [
-  { key: "blue", label: "Xanh dịu", from: "#F8FAFC", via: "#EEF6FF", to: "#FFFFFF", accent: "#2563EB" },
-  { key: "mint", label: "Mint", from: "#F8FAFC", via: "#ECFDF5", to: "#FFFFFF", accent: "#059669" },
-  { key: "rose", label: "Rose", from: "#FFF7F7", via: "#FFF1F2", to: "#FFFFFF", accent: "#E11D48" },
-  { key: "amber", label: "Amber", from: "#FFFBEB", via: "#FEF3C7", to: "#FFFFFF", accent: "#D97706" },
-  { key: "violet", label: "Violet", from: "#FAF5FF", via: "#F5F3FF", to: "#FFFFFF", accent: "#7C3AED" }
-];
-
-function applyTheme(themeKey: string) {
-  const theme = THEMES.find((item) => item.key === themeKey) ?? THEMES[0];
-  document.documentElement.style.setProperty("--app-accent", theme.accent);
-  document.documentElement.style.setProperty("--app-accent-soft", theme.via);
-  document.documentElement.style.setProperty("--app-accent-contrast", "#ffffff");
-  document.body.style.background = `radial-gradient(circle at top left, ${theme.via}, transparent 28%), linear-gradient(180deg, ${theme.from} 0%, ${theme.via} 48%, ${theme.to} 100%)`;
-}
-
-export function ThemePicker() {
-  const { token } = useAuthStore();
-  const [open, setOpen] = useState(false);
+export function ThemePicker({ open: controlledOpen, onOpenChange }: ThemePickerProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [themeKey, setThemeKey] = useState("blue");
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [passwordSaved, setPasswordSaved] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const isOpen = controlledOpen ?? uncontrolledOpen;
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(THEME_KEY) || "blue";
+    const stored = readStoredTheme();
     setThemeKey(stored);
     applyTheme(stored);
+    setMounted(true);
   }, []);
+
+  const setOpen = (nextOpen: boolean) => {
+    if (controlledOpen === undefined) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
 
   const selectTheme = (nextTheme: string) => {
     setThemeKey(nextTheme);
-    window.localStorage.setItem(THEME_KEY, nextTheme);
+    persistTheme(nextTheme);
     applyTheme(nextTheme);
     setOpen(false);
   };
 
+  if (!mounted) return null;
+
   return (
     <div className="relative">
       <button
-        className="icon-btn flex h-12 w-12 items-center justify-center rounded-2xl border border-transparent hover:bg-[color:var(--app-accent-soft)] hover:text-[color:var(--app-accent)]"
+        className="icon-btn flex h-12 w-12 items-center justify-center rounded-2xl border border-transparent hover:bg-[color:var(--primary-soft)] hover:text-[color:var(--primary)]"
         aria-label="Cài đặt giao diện"
-        onClick={() => setOpen((value) => !value)}
+        aria-expanded={isOpen}
+        onClick={() => setOpen(!isOpen)}
       >
         <Settings2 size={22} />
       </button>
 
-      {open && (
-        <div className="absolute bottom-0 left-[calc(100%+14px)] z-40 w-64 rounded-3xl border border-slate-200 bg-white/95 p-2 shadow-[0_24px_60px_-32px_rgba(15,23,42,0.35)] backdrop-blur">
-          <div className="px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Bảng màu</div>
-          {THEMES.map((theme) => (
-            <button
-              key={theme.key}
-              className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-                themeKey === theme.key ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
-              }`}
-              style={themeKey === theme.key ? { background: "color-mix(in srgb, var(--app-accent-soft) 68%, white)" } : undefined}
-              onClick={() => selectTheme(theme.key)}
-            >
-              <span className="h-7 w-7 rounded-full border border-white shadow-sm" style={{ background: `linear-gradient(135deg, ${theme.via}, ${theme.accent})` }} />
-              {theme.label}
-            </button>
-          ))}
-
-          <button
-            className="mt-1 w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-left text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-            onClick={() => {
-              setPasswordOpen(true);
-              setOpen(false);
-              setPasswordError(null);
-              setPasswordSaved(false);
-            }}
-          >
-            Đổi mật khẩu
-          </button>
-        </div>
-      )}
-
-      {passwordOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/18 px-4 backdrop-blur-sm" onClick={() => setPasswordOpen(false)}>
-          <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.28)]" onClick={(event) => event.stopPropagation()}>
-            <h2 className="text-xl font-bold tracking-tight text-slate-900">Đổi mật khẩu</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500">Áp dụng cho tài khoản đăng nhập bằng mã nhân viên.</p>
-
-            <div className="mt-5 space-y-3">
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[color:var(--app-accent)] focus:bg-white"
-                type="password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                placeholder="Mật khẩu hiện tại"
-              />
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[color:var(--app-accent)] focus:bg-white"
-                type="password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                placeholder="Mật khẩu mới, tối thiểu 6 ký tự"
-              />
-            </div>
-
-            {passwordError && <p className="mt-3 text-sm text-red-600">{passwordError}</p>}
-            {passwordSaved && <p className="mt-3 text-sm text-emerald-600">Đã đổi mật khẩu.</p>}
-
-            <div className="mt-5 flex justify-end gap-3">
-              <button className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50" onClick={() => setPasswordOpen(false)}>
-                Đóng
-              </button>
-              <button
-                className="rounded-2xl px-4 py-2.5 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 78%, black))" }}
-                disabled={!token || !currentPassword || newPassword.length < 6}
-                onClick={async () => {
-                  if (!token) return;
-                  setPasswordError(null);
-                  setPasswordSaved(false);
-                  try {
-                    await apiRequest("/auth/change-password", token, "POST", { currentPassword, newPassword });
-                    setCurrentPassword("");
-                    setNewPassword("");
-                    setPasswordSaved(true);
-                  } catch (error) {
-                    setPasswordError(error instanceof Error ? error.message : "Không thể đổi mật khẩu");
-                  }
-                }}
-              >
-                Lưu
-              </button>
+      {isOpen && (
+        <>
+          <div className="absolute bottom-0 left-[calc(100%+14px)] z-40 hidden w-[360px] rounded-[22px] border border-slate-200 bg-white/95 p-3 shadow-[0_24px_60px_-32px_rgba(15,23,42,0.35)] backdrop-blur md:block">
+            <div className="px-2 pb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Bảng màu</div>
+            <div className="grid max-h-[380px] grid-cols-2 gap-2 overflow-y-auto pr-1">
+              {THEMES.map((theme) => {
+                const selected = themeKey === theme.key;
+                return (
+                  <button
+                    key={theme.key}
+                    className={`flex h-14 items-center gap-3 rounded-2xl border px-3 text-left text-sm font-semibold transition ${
+                      selected
+                        ? "theme-primary-border bg-[color:var(--primary-faint)] text-slate-900 shadow-sm"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                    onClick={() => selectTheme(theme.key)}
+                  >
+                    <span className="h-7 w-7 shrink-0 rounded-full border border-white shadow-sm" style={{ background: `linear-gradient(135deg, ${theme.via}, ${theme.accent})` }} />
+                    <span className="min-w-0 flex-1 truncate">{theme.label}</span>
+                    {selected ? <span className="text-[11px] font-bold text-[color:var(--primary)]">Đang chọn</span> : null}
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </div>
+
+          <div className="fixed inset-0 z-50 bg-slate-950/25 backdrop-blur-sm md:hidden" onClick={() => setOpen(false)}>
+            <div
+              className="absolute bottom-4 left-4 right-4 mx-auto flex max-h-[80vh] w-[calc(100%-32px)] max-w-[420px] flex-col rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.34)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-bold uppercase tracking-[0.16em] text-slate-400">Bảng màu</div>
+                <button
+                  type="button"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  onClick={() => setOpen(false)}
+                  aria-label="Đóng bảng màu"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto pr-1 [@media(max-width:360px)]:grid-cols-1">
+                {THEMES.map((theme) => {
+                  const selected = themeKey === theme.key;
+                  return (
+                    <button
+                      key={theme.key}
+                      className={`flex h-14 items-center gap-3 rounded-2xl border px-3 text-left text-sm font-semibold transition ${
+                        selected
+                          ? "theme-primary-border bg-[color:var(--primary-faint)] text-slate-900 shadow-sm"
+                          : "border-slate-200 bg-white text-slate-600"
+                      }`}
+                      onClick={() => selectTheme(theme.key)}
+                    >
+                      <span className="h-7 w-7 shrink-0 rounded-full border border-white shadow-sm" style={{ background: `linear-gradient(135deg, ${theme.via}, ${theme.accent})` }} />
+                      <span className="min-w-0 flex-1 truncate">{theme.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

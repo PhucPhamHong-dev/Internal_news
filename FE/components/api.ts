@@ -8,6 +8,16 @@ type ApiRequestOptions = {
   signal?: AbortSignal;
 };
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export async function apiRequest<T>(
   path: string,
   token: string | null,
@@ -27,7 +37,7 @@ export async function apiRequest<T>(
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || "Request failed");
+    throw new ApiError(error.message || "Request failed", response.status);
   }
   return response.json() as Promise<T>;
 }

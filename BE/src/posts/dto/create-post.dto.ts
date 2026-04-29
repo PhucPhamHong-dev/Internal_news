@@ -45,7 +45,7 @@ class PostContentBlockDto {
 
   @IsString()
   @IsNotEmpty()
-  type!: "paragraph" | "image" | "video";
+  type!: "paragraph" | "heading" | "quote" | "divider" | "image" | "video";
 
   @IsOptional()
   @IsString()

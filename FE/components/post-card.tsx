@@ -4,22 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Heart, MessageCircle, MoreHorizontal, PenSquare, Pin, Trash2, X } from "lucide-react";
+import { Eye, Heart, MessageCircle, MoreHorizontal, PenSquare, Pin, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "./api";
 import { Profile } from "./auth-store";
+import { EditablePost, PostEditorModal } from "./post-editor-modal";
 import { capturePostQueryState, restorePostQueryState, updatePostCounters } from "./post-query-cache";
-import { Avatar, FeedPost, RelativeTime } from "./post-shared";
-
-const REACTIONS = [
-  { type: "LIKE", icon: "👍", label: "Thích" },
-  { type: "LOVE", icon: "❤️", label: "Yêu thích" },
-  { type: "CARE", icon: "🥰", label: "Quan tâm" },
-  { type: "HAHA", icon: "😄", label: "Haha" },
-  { type: "WOW", icon: "😮", label: "Wow" },
-  { type: "SAD", icon: "😢", label: "Buồn" },
-  { type: "ANGRY", icon: "😡", label: "Giận" }
-] as const;
+import { Avatar, FeedPost, REACTION_OPTIONS, RelativeTime } from "./post-shared";
+import { ReactionSummaryModal } from "./reaction-summary-modal";
 
 type PostCardProps = {
   post: FeedPost;
@@ -33,31 +25,25 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [editTitle, setEditTitle] = useState(post.title);
-  const [editContent, setEditContent] = useState(post.content);
-  const [editBusy, setEditBusy] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editLoadError, setEditLoadError] = useState<string | null>(null);
+  const [editPost, setEditPost] = useState<EditablePost | null>(null);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [reactionSummaryOpen, setReactionSummaryOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const reactionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canPin = useMemo(() => {
     if (profile.role === "ADMIN") return true;
-    if (profile.role === "WRITER") return post.authorId === profile.id;
-    return false;
-  }, [post.authorId, profile.id, profile.role]);
+    return profile.canPost && post.authorId === profile.id;
+  }, [post.authorId, profile.canPost, profile.id, profile.role]);
 
   const canManagePost = useMemo(() => {
     if (profile.role === "ADMIN") return true;
-    return profile.role === "WRITER" && post.authorId === profile.id;
-  }, [post.authorId, profile.id, profile.role]);
+    return profile.canPost && post.authorId === profile.id;
+  }, [post.authorId, profile.canPost, profile.id, profile.role]);
 
   const previewMedia = post.media[0] ?? null;
-
-  useEffect(() => {
-    setEditTitle(post.title);
-    setEditContent(post.content);
-  }, [post.content, post.title]);
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
@@ -91,7 +77,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
     });
   };
 
-  const setReaction = async (reactionType: (typeof REACTIONS)[number]["type"] | null) => {
+  const setReaction = async (reactionType: (typeof REACTION_OPTIONS)[number]["type"] | null) => {
     const nextLiked = Boolean(reactionType);
     const snapshot = capturePostQueryState(queryClient, post.id);
 
@@ -113,7 +99,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
     }
   };
 
-  const activeReaction = REACTIONS.find((item) => item.type === post.myReaction);
+  const activeReaction = REACTION_OPTIONS.find((item) => item.type === post.myReaction);
 
   const openReactions = () => {
     if (reactionsTimerRef.current) clearTimeout(reactionsTimerRef.current);
@@ -125,23 +111,19 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
     reactionsTimerRef.current = setTimeout(() => setReactionsOpen(false), 220);
   };
 
-  const submitEditPost = async () => {
-    if (!editTitle.trim() || !editContent.trim()) return;
-
+  const openEditModal = async () => {
     try {
-      setEditBusy(true);
-      setEditError(null);
-      await apiRequest(`/posts/${post.id}`, token, "PATCH", {
-        title: editTitle,
-        content: editContent
-      });
-      setEditOpen(false);
+      setEditLoading(true);
+      setEditLoadError(null);
+      const detail = await apiRequest<EditablePost>(`/posts/${post.id}`, token, "GET");
+      setEditPost(detail);
+      setEditOpen(true);
       setMenuOpen(false);
-      onRefresh();
     } catch (error) {
-      setEditError(error instanceof Error ? error.message : "Không thể cập nhật bài viết");
+      setEditLoadError(error instanceof Error ? error.message : "Khong the tai bai viet");
+      setEditOpen(true);
     } finally {
-      setEditBusy(false);
+      setEditLoading(false);
     }
   };
 
@@ -160,7 +142,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
 
   return (
     <>
-      <article className="card mb-4 overflow-hidden transition hover:shadow-[0_22px_55px_-36px_rgba(37,99,235,0.32)]">
+      <article className="card mb-4 overflow-hidden transition hover:shadow-[0_22px_55px_-36px_rgba(15,23,42,0.2)]">
         <div className="flex gap-4 px-5 py-5 sm:px-6">
           <div className="flex w-12 shrink-0 items-start justify-center pt-0.5">
             <Avatar name={post.authorName} avatarUrl={post.authorAvatar} />
@@ -178,7 +160,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
                 {post.title.trim() && <h3 className="mt-1 text-[22px] font-bold leading-tight text-slate-900">{post.title}</h3>}
 
                 {post.isPinned && (
-                  <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-600">
+                  <div className="theme-primary-soft mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold">
                     <Pin size={11} />
                     Ưu tiên {post.pinPriority}
                   </div>
@@ -188,7 +170,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
               <div className="flex items-center gap-2 text-slate-400">
                 {canPin && (
                   <button
-                    className="icon-btn h-9 w-9 rounded-full hover:bg-blue-50 hover:text-blue-600"
+                    className="icon-btn h-9 w-9 rounded-full hover:bg-[color:var(--app-accent-faint)] hover:text-[color:var(--app-accent)]"
                     onClick={async () => {
                       if (post.isPinned) {
                         await apiRequest(`/posts/${post.id}/pin`, token, "DELETE");
@@ -217,10 +199,7 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
                       <div className="absolute right-0 top-10 z-10 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_20px_45px_-28px_rgba(15,23,42,0.3)]">
                         <button
                           className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                          onClick={() => {
-                            setEditOpen(true);
-                            setMenuOpen(false);
-                          }}
+                          onClick={() => void openEditModal()}
                         >
                           <PenSquare size={16} />
                           <span>Sửa bài viết</span>
@@ -258,8 +237,9 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
             <div className="mt-5 flex items-center gap-6 text-[14px] text-slate-500">
               <div className="relative" onMouseEnter={openReactions} onMouseLeave={closeReactions}>
                 <button
-                  className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "text-blue-600" : ""}`}
-                  onClick={() => void setReaction(post.likedByMe ? null : "LIKE")}
+                  className={`inline-flex items-center gap-2 transition hover:text-slate-700 ${post.likedByMe ? "theme-primary-text" : ""}`}
+                  onClick={() => setReactionSummaryOpen(true)}
+                  aria-label="Xem thống kê cảm xúc"
                 >
                   {activeReaction ? <span className="text-lg leading-none">{activeReaction.icon}</span> : <Heart size={20} />}
                   <span>{post.likeCount}</span>
@@ -269,14 +249,14 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
                     reactionsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"
                   }`}
                 >
-                  {REACTIONS.map((reaction) => (
+                  {REACTION_OPTIONS.map((reaction) => (
                     <button
                       key={reaction.type}
                       className="flex h-9 w-9 items-center justify-center rounded-full text-xl transition hover:-translate-y-1 hover:bg-slate-50"
                       title={reaction.label}
                       onClick={() => {
                         setReactionsOpen(false);
-                        void setReaction(reaction.type);
+                        void setReaction(post.myReaction === reaction.type ? null : reaction.type);
                       }}
                     >
                       {reaction.icon}
@@ -300,60 +280,18 @@ export function PostCard({ post, token, profile, onRefresh }: PostCardProps) {
       </article>
 
       {editOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/20 p-4 backdrop-blur-sm" onClick={() => setEditOpen(false)}>
-          <div
-            className="mx-auto w-full max-w-2xl rounded-[32px] border border-slate-200 bg-white text-slate-900 shadow-[0_35px_90px_-45px_rgba(15,23,42,0.3)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-              <div className="w-10" />
-              <h2 className="text-2xl font-bold tracking-tight">Sửa bài viết</h2>
-              <button
-                className="icon-btn h-10 w-10 rounded-full border border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-                onClick={() => setEditOpen(false)}
-                aria-label="Đóng"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4 px-6 py-5">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-600">Tiêu đề</label>
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
-                  value={editTitle}
-                  onChange={(event) => setEditTitle(event.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-600">Nội dung</label>
-                <textarea
-                  className="min-h-48 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
-                  value={editContent}
-                  onChange={(event) => setEditContent(event.target.value)}
-                />
-              </div>
-
-              {editError && <div className="text-sm text-red-600">{editError}</div>}
-
-              <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
-                <button className="rounded-2xl border border-slate-200 px-5 py-2.5 text-slate-600 transition hover:bg-slate-50" onClick={() => setEditOpen(false)}>
-                  Đóng
-                </button>
-                <button
-                  className="rounded-2xl bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() => void submitEditPost()}
-                  disabled={editBusy || !editTitle.trim() || !editContent.trim()}
-                >
-                  {editBusy ? "Đang lưu..." : "Lưu thay đổi"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PostEditorModal
+          mode="edit"
+          token={token}
+          post={editPost}
+          loading={editLoading}
+          loadError={editLoadError}
+          onClose={() => setEditOpen(false)}
+          onSaved={onRefresh}
+        />
       )}
+
+      <ReactionSummaryModal open={reactionSummaryOpen} postId={post.id} token={token} onClose={() => setReactionSummaryOpen(false)} />
     </>
   );
 }

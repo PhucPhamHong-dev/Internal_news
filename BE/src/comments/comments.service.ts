@@ -65,7 +65,7 @@ export class CommentsService {
     await this.bumpPostCommentCount(postId, 1);
     await this.invalidatePostCaches(postId);
 
-    if (post.author.role === RoleEnum.WRITER && post.authorId !== user.sub) {
+    if ((post.author.canPost || post.author.role === RoleEnum.ADMIN) && post.authorId !== user.sub) {
       const notification = await this.prisma.notification.create({
         data: {
           recipientId: post.authorId,

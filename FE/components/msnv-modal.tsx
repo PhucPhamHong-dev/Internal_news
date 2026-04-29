@@ -30,14 +30,14 @@ export function MsnvModal({ onSubmit, loading }: MsnvModalProps) {
         <input
           value={msnv}
           onChange={(event) => setMsnv(event.target.value)}
-          className="mt-5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-300 focus:bg-white"
+          className="theme-primary-focus mt-5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:bg-white"
           placeholder="Ví dụ: EMP0001"
         />
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="mt-5 inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn-primary mt-5 inline-flex w-full items-center justify-center disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Đang xử lý..." : "Liên kết MSNV"}
         </button>

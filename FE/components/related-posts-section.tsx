@@ -32,7 +32,7 @@ export function RelatedPostsSection({ posts }: RelatedPostsSectionProps) {
             <Link
               key={post.id}
               href={`/posts/${post.id}`}
-              className="flex items-start gap-4 rounded-[24px] border border-slate-200 bg-white px-4 py-4 transition hover:border-blue-200 hover:bg-blue-50/40"
+              className="theme-primary-border-hover flex items-start gap-4 rounded-[24px] border border-slate-200 bg-white px-4 py-4 transition hover:bg-[color:var(--app-accent-faint)]"
             >
               <div className="min-w-0 flex-1">
                 <div className="text-[17px] font-semibold leading-7 text-slate-900">{post.title}</div>

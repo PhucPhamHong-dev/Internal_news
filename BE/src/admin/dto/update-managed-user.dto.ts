@@ -1,5 +1,4 @@
-import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
-import { RoleEnum } from "../../common/enums";
+import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class UpdateManagedUserDto {
   @IsOptional()
@@ -12,6 +11,15 @@ export class UpdateManagedUserDto {
   isActive?: boolean;
 
   @IsOptional()
-  @IsEnum(RoleEnum)
-  preferredRole?: RoleEnum;
+  @IsBoolean()
+  canPost?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canManageEmployees?: boolean;
+
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(160)
+  loginEmail?: string | null;
 }

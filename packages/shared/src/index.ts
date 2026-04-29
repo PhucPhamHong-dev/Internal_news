@@ -1,5 +1,6 @@
 export enum Role {
   ADMIN = "ADMIN",
+  HR_MANAGER = "HR_MANAGER",
   WRITER = "WRITER",
   VIEWER = "VIEWER"
 }
@@ -10,6 +11,8 @@ export type UserProfile = {
   fullName: string;
   avatarUrl: string | null;
   role: Role;
+  canPost: boolean;
+  canManageEmployees: boolean;
   linkedMsnv: string | null;
   linked: boolean;
 };
